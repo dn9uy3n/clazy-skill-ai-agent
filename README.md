@@ -75,6 +75,16 @@ Open the project in VS Code → press `F5` → select the **"Run Extension"** la
 
 A standalone Electron app for Windows, macOS, and Linux.
 
+### Download prebuilt binaries
+
+Get the latest installer from the [GitHub Releases](../../releases) page:
+
+| OS | File |
+|----|------|
+| Windows | `Clazy Skill AI Agent Setup X.Y.Z.exe` |
+| macOS | `Clazy Skill AI Agent-X.Y.Z.dmg` |
+| Linux | `clazy-skill-ai-agent-app-X.Y.Z.tar.gz` |
+
 ### Run in Development Mode
 
 ```bash

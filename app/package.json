@@ -39,7 +39,7 @@
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": ["tar.gz"],
       "category": "Development"
     }
   }
