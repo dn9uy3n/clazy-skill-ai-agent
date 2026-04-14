@@ -75,7 +75,7 @@ export class LazySkillPanel {
     this.skills = await scanDirectories(dirs);
 
     if (projectPath) {
-      const installed = await getInstalledSkillNames(projectPath);
+      const installed = await getInstalledSkillNames(projectPath, this.currentPlatform);
       this.skills = markInstalled(this.skills, installed);
     }
 
@@ -134,7 +134,7 @@ export class LazySkillPanel {
         }
 
         const selectedIds = new Set(msg.skillIds);
-        const result = await applyChanges(this.skills, selectedIds, projectPath);
+        const result = await applyChanges(this.skills, selectedIds, projectPath, this.currentPlatform);
 
         this.postMessage({
           command: 'applyResult',

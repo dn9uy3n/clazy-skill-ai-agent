@@ -54,7 +54,7 @@ btnApply.addEventListener('click', async () => {
     return;
   }
   setStatus('Applying...');
-  const result = await api.applyChanges(skills, Array.from(checkedIds), config.lastProjectPath);
+  const result = await api.applyChanges(skills, Array.from(checkedIds), config.lastProjectPath, config.platform);
   if (result.errors.length > 0) {
     setStatus(`Done with errors: ${result.errors.join('; ')}`, true);
   } else {
@@ -69,6 +69,7 @@ document.querySelectorAll('input[name="platform"]').forEach(r => {
   r.addEventListener('change', async (e) => {
     config.platform = /** @type {HTMLInputElement} */ (e.target).value;
     await api.saveConfig(config);
+    await refresh();
   });
 });
 
@@ -85,7 +86,7 @@ async function refresh() {
   projectPathEl.textContent = config.lastProjectPath || 'No project selected';
   renderDirectories();
 
-  skills = await api.scanSkills(config.skillDirectories, config.lastProjectPath);
+  skills = await api.scanSkills(config.skillDirectories, config.lastProjectPath, config.platform);
   checkedIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
   renderSkills();
 }

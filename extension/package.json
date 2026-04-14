@@ -2,7 +2,7 @@
   "name": "lazy-skill-ai-agent",
   "displayName": "Lazy Skill AI Agent",
   "description": "Manage AI skills for Claude Code and Antigravity projects",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "dn9uy3n",
   "engines": {
     "vscode": "^1.85.0"

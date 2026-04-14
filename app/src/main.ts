@@ -57,10 +57,15 @@ ipcMain.handle('dialog:selectDirectory', async (_e, title: string) => {
 
 ipcMain.handle(
   'skills:scan',
-  async (_e, dirs: string[], projectPath: string | undefined): Promise<SkillInfo[]> => {
+  async (
+    _e,
+    dirs: string[],
+    projectPath: string | undefined,
+    platform: TargetPlatform,
+  ): Promise<SkillInfo[]> => {
     let skills = await scanDirectories(dirs);
     if (projectPath) {
-      const installed = await getInstalledSkillNames(projectPath);
+      const installed = await getInstalledSkillNames(projectPath, platform);
       skills = markInstalled(skills, installed);
     }
     return skills;
@@ -69,7 +74,13 @@ ipcMain.handle(
 
 ipcMain.handle(
   'skills:apply',
-  async (_e, allSkills: SkillInfo[], selectedIds: string[], projectPath: string) => {
-    return await applyChanges(allSkills, new Set(selectedIds), projectPath);
+  async (
+    _e,
+    allSkills: SkillInfo[],
+    selectedIds: string[],
+    projectPath: string,
+    platform: TargetPlatform,
+  ) => {
+    return await applyChanges(allSkills, new Set(selectedIds), projectPath, platform);
   },
 );

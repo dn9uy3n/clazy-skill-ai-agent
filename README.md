@@ -36,7 +36,14 @@ description: Auto-generate commit messages
 
 File lookup priority: `SKILL.md` → `{dir-name}.md` → first `.md` file.
 
-When applied, each skill is copied to `{project}/.claude/commands/{skill-name}.md`.
+When applied, the **entire skill folder** (markdown, scripts, helpers — everything) is copied into the workspace skills directory of the selected platform:
+
+| Platform | Workspace Skills Folder |
+|----------|--------------------------|
+| **Claude Code** | `{project}/.claude/skills/{skill-name}/` |
+| **Antigravity** | `{project}/.agent/skills/{skill-name}/` |
+
+The platform toggle at the top of the UI controls which folder is read from / written to. Switching platforms updates the install state of each skill in the list accordingly.
 
 ---
 

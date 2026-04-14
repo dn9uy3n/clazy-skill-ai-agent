@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { SkillInfo } from './types';
+import { SkillInfo, TargetPlatform } from './types';
+import { getSkillsDir } from './skillInstaller';
 
 interface Frontmatter {
   name?: string;
@@ -113,8 +114,11 @@ export async function scanDirectories(dirs: string[]): Promise<SkillInfo[]> {
   return skills;
 }
 
-export async function getInstalledSkillNames(projectPath: string): Promise<string[]> {
-  const skillsDir = path.join(projectPath, '.claude', 'skills');
+export async function getInstalledSkillNames(
+  projectPath: string,
+  platform: TargetPlatform,
+): Promise<string[]> {
+  const skillsDir = getSkillsDir(projectPath, platform);
   try {
     const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(skillsDir));
     return entries

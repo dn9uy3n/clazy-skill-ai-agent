@@ -1,29 +1,38 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { SkillInfo } from './types';
-
-function getSkillsDir(projectPath: string): string {
-  return path.join(projectPath, '.claude', 'skills');
-}
+import { SkillInfo, TargetPlatform } from './types';
 
 /**
- * Copy the entire skill source directory into the project's .claude/skills/ folder.
+ * Workspace skills folder per platform:
+ *   - Claude Code  -> {project}/.claude/skills
+ *   - Antigravity  -> {project}/.agent/skills
  */
-export async function installSkill(skill: SkillInfo, projectPath: string): Promise<void> {
-  const skillsDir = getSkillsDir(projectPath);
+export function getSkillsDir(projectPath: string, platform: TargetPlatform): string {
+  const root = platform === 'antigravity' ? '.agent' : '.claude';
+  return path.join(projectPath, root, 'skills');
+}
+
+export async function installSkill(
+  skill: SkillInfo,
+  projectPath: string,
+  platform: TargetPlatform,
+): Promise<void> {
+  const skillsDir = getSkillsDir(projectPath, platform);
   await fs.mkdir(skillsDir, { recursive: true });
 
   const sourceDir = path.dirname(skill.sourcePath);
   const targetDir = path.join(skillsDir, skill.name);
 
-  // Remove existing target if present (overwrite behavior)
   await fs.rm(targetDir, { recursive: true, force: true });
-
   await fs.cp(sourceDir, targetDir, { recursive: true });
 }
 
-export async function uninstallSkill(skillName: string, projectPath: string): Promise<void> {
-  const targetDir = path.join(getSkillsDir(projectPath), skillName);
+export async function uninstallSkill(
+  skillName: string,
+  projectPath: string,
+  platform: TargetPlatform,
+): Promise<void> {
+  const targetDir = path.join(getSkillsDir(projectPath, platform), skillName);
   await fs.rm(targetDir, { recursive: true, force: true });
 }
 
@@ -37,6 +46,7 @@ export async function applyChanges(
   allSkills: SkillInfo[],
   selectedIds: Set<string>,
   projectPath: string,
+  platform: TargetPlatform,
 ): Promise<ApplyResult> {
   const result: ApplyResult = { installed: 0, removed: 0, errors: [] };
 
@@ -45,14 +55,14 @@ export async function applyChanges(
 
     if (shouldInstall && !skill.isInstalled) {
       try {
-        await installSkill(skill, projectPath);
+        await installSkill(skill, projectPath, platform);
         result.installed++;
       } catch (e) {
         result.errors.push(`Failed to install ${skill.name}: ${e}`);
       }
     } else if (!shouldInstall && skill.isInstalled) {
       try {
-        await uninstallSkill(skill.name, projectPath);
+        await uninstallSkill(skill.name, projectPath, platform);
         result.removed++;
       } catch (e) {
         result.errors.push(`Failed to remove ${skill.name}: ${e}`);
