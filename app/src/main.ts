@@ -1,16 +1,23 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import { loadConfig, saveConfig } from './config';
-import { scanDirectories, getInstalledSkillNames, markInstalled } from './skillScanner';
+import {
+  scanDirectories,
+  scanRuleFiles,
+  getInstalledSkillNames,
+  getInstalledRuleNames,
+  markInstalled,
+  markRulesInstalled,
+} from './skillScanner';
 import { applyChanges } from './skillInstaller';
-import { SkillInfo, TargetPlatform } from './types';
+import { RuleInfo, SkillInfo, TargetPlatform } from './types';
 
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 750,
+    width: 950,
+    height: 850,
     title: 'Lazy Skill AI Agent',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -37,15 +44,8 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-// --- IPC Handlers ---
-
-ipcMain.handle('config:load', async () => {
-  return await loadConfig();
-});
-
-ipcMain.handle('config:save', async (_e, config) => {
-  await saveConfig(config);
-});
+ipcMain.handle('config:load', async () => loadConfig());
+ipcMain.handle('config:save', async (_e, config) => saveConfig(config));
 
 ipcMain.handle('dialog:selectDirectory', async (_e, title: string) => {
   const result = await dialog.showOpenDialog(mainWindow!, {
@@ -55,20 +55,34 @@ ipcMain.handle('dialog:selectDirectory', async (_e, title: string) => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+ipcMain.handle('dialog:selectFiles', async (_e, title: string) => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openFile', 'multiSelections'],
+    title,
+    filters: [
+      { name: 'Rule files', extensions: ['md', 'mdc', 'txt'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return result.canceled ? [] : result.filePaths;
+});
+
 ipcMain.handle(
   'skills:scan',
   async (
     _e,
-    dirs: string[],
+    skillDirs: string[],
+    ruleFiles: string[],
     projectPath: string | undefined,
     platform: TargetPlatform,
-  ): Promise<SkillInfo[]> => {
-    let skills = await scanDirectories(dirs);
+  ): Promise<{ skills: SkillInfo[]; rules: RuleInfo[] }> => {
+    let skills = await scanDirectories(skillDirs);
+    let rules = await scanRuleFiles(ruleFiles);
     if (projectPath) {
-      const installed = await getInstalledSkillNames(projectPath, platform);
-      skills = markInstalled(skills, installed);
+      skills = markInstalled(skills, await getInstalledSkillNames(projectPath, platform));
+      rules = markRulesInstalled(rules, await getInstalledRuleNames(projectPath, platform));
     }
-    return skills;
+    return { skills, rules };
   },
 );
 
@@ -77,10 +91,19 @@ ipcMain.handle(
   async (
     _e,
     allSkills: SkillInfo[],
-    selectedIds: string[],
+    selectedSkillIds: string[],
+    allRules: RuleInfo[],
+    selectedRuleIds: string[],
     projectPath: string,
     platform: TargetPlatform,
   ) => {
-    return await applyChanges(allSkills, new Set(selectedIds), projectPath, platform);
+    return await applyChanges(
+      allSkills,
+      new Set(selectedSkillIds),
+      allRules,
+      new Set(selectedRuleIds),
+      projectPath,
+      platform,
+    );
   },
 );

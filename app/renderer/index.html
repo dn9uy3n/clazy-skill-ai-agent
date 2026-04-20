@@ -8,9 +8,7 @@
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>Lazy Skill AI Agent</h1>
-    </header>
+    <header><h1>Lazy Skill AI Agent</h1></header>
 
     <section class="project-section">
       <h3>Project Path</h3>
@@ -30,6 +28,10 @@
         <input type="radio" name="platform" value="antigravity">
         Antigravity
       </label>
+      <label class="radio-label">
+        <input type="radio" name="platform" value="cursor">
+        Cursor
+      </label>
     </section>
 
     <section class="directories-section">
@@ -46,9 +48,23 @@
       <div id="skill-list" class="skill-list"></div>
     </section>
 
+    <section class="directories-section">
+      <h3>Rule Files</h3>
+      <div id="rule-file-list"></div>
+      <button id="btn-add-rule-file" class="btn btn-secondary">+ Add Rule File</button>
+    </section>
+
+    <section class="skills-section">
+      <div class="skills-header">
+        <h3>Available Rules</h3>
+        <input type="text" id="rule-filter-input" placeholder="Filter rules..." />
+      </div>
+      <div id="rule-list" class="skill-list"></div>
+    </section>
+
     <section class="description-section">
       <h3>Description</h3>
-      <div id="skill-description" class="description-box">Select a skill to see its description.</div>
+      <div id="skill-description" class="description-box">Select an item to see its description.</div>
     </section>
 
     <footer class="actions-section">

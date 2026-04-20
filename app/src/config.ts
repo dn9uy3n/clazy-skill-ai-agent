@@ -5,6 +5,7 @@ import { AppConfig } from './types';
 
 const DEFAULT_CONFIG: AppConfig = {
   skillDirectories: [],
+  ruleFiles: [],
   platform: 'claude-code',
 };
 

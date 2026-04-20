@@ -1,33 +1,55 @@
 export interface SkillInfo {
   /** Unique identifier: sourceDir basename + skill name */
   id: string;
-  /** Skill name from frontmatter */
   name: string;
-  /** Description from frontmatter */
   description: string;
-  /** Full path to the source .md file */
+  /** Full path to the source .md file inside the skill folder */
   sourcePath: string;
-  /** Which configured directory this came from */
+  /** The configured root directory this skill came from */
   sourceDir: string;
-  /** Whether it is from commands or skills directory */
+  /** Whether it is from commands or skills directory layout */
   format: 'command' | 'skill';
-  /** Whether this skill is currently installed in the project */
   isInstalled: boolean;
-  /** Full body content (after frontmatter) for detail view */
   body: string;
 }
 
-export type TargetPlatform = 'claude-code' | 'antigravity';
+export interface RuleInfo {
+  /** Unique identifier */
+  id: string;
+  /** Filename without extension (used as install target name) */
+  name: string;
+  description: string;
+  /** Full path to the source rule file */
+  sourcePath: string;
+  isInstalled: boolean;
+  body: string;
+}
 
-/** Messages sent from webview to extension */
+export type TargetPlatform = 'claude-code' | 'antigravity' | 'cursor';
+
 export type WebviewMessage =
   | { command: 'ready' }
-  | { command: 'apply'; skillIds: string[] }
+  | { command: 'apply'; skillIds: string[]; ruleIds: string[] }
   | { command: 'changePlatform'; platform: TargetPlatform }
   | { command: 'addDirectory' }
-  | { command: 'removeDirectory'; directory: string };
+  | { command: 'removeDirectory'; directory: string }
+  | { command: 'addRuleFile' }
+  | { command: 'removeRuleFile'; file: string };
 
-/** Messages sent from extension to webview */
 export type ExtensionMessage =
-  | { command: 'update'; skills: SkillInfo[]; directories: string[]; platform: TargetPlatform }
-  | { command: 'applyResult'; installed: number; removed: number; errors: string[] };
+  | {
+      command: 'update';
+      skills: SkillInfo[];
+      rules: RuleInfo[];
+      directories: string[];
+      ruleFiles: string[];
+      platform: TargetPlatform;
+    }
+  | {
+      command: 'applyResult';
+      skillsInstalled: number;
+      skillsRemoved: number;
+      rulesInstalled: number;
+      rulesRemoved: number;
+      errors: string[];
+    };

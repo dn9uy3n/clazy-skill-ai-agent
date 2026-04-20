@@ -2,7 +2,7 @@
   "name": "lazy-skill-ai-agent",
   "displayName": "Lazy Skill AI Agent",
   "description": "Manage AI skills for Claude Code and Antigravity projects",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "dn9uy3n",
   "engines": {
     "vscode": "^1.85.0"
@@ -28,7 +28,15 @@
           "items": {
             "type": "string"
           },
-          "description": "Paths to directories containing AI skills (commands/*.md or skills/*/SKILL.md)"
+          "description": "Paths to directories whose subfolders are AI skills"
+        },
+        "lazy-skill-ai-agent.ruleFiles": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths to individual rule files (.md/.mdc/.txt) that can be added to a project"
         }
       }
     }

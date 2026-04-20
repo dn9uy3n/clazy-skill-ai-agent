@@ -1,239 +1,247 @@
 // @ts-check
 
-/** @type {ReturnType<typeof acquireVsCodeApi>} */
 const vscode = acquireVsCodeApi();
 
 /** @type {import('../src/types').SkillInfo[]} */
 let skills = [];
-
+/** @type {import('../src/types').RuleInfo[]} */
+let rules = [];
 /** @type {string[]} */
 let directories = [];
-
-/** @type {string} */
+/** @type {string[]} */
+let ruleFiles = [];
 let currentPlatform = 'claude-code';
-
-/** @type {string|null} */
-let selectedSkillId = null;
-
+let selectedItemId = null;
 /** @type {Set<string>} */
-let checkedIds = new Set();
+let checkedSkillIds = new Set();
+/** @type {Set<string>} */
+let checkedRuleIds = new Set();
 
-// --- DOM refs ---
-const dirList = /** @type {HTMLDivElement} */ (document.getElementById('dir-list'));
-const skillList = /** @type {HTMLDivElement} */ (document.getElementById('skill-list'));
+const dirList = document.getElementById('dir-list');
+const ruleFileList = document.getElementById('rule-file-list');
+const skillList = document.getElementById('skill-list');
+const ruleList = document.getElementById('rule-list');
 const filterInput = /** @type {HTMLInputElement} */ (document.getElementById('filter-input'));
-const descriptionBox = /** @type {HTMLDivElement} */ (document.getElementById('skill-description'));
-const btnAddDir = /** @type {HTMLButtonElement} */ (document.getElementById('btn-add-dir'));
-const btnCancel = /** @type {HTMLButtonElement} */ (document.getElementById('btn-cancel'));
-const btnApply = /** @type {HTMLButtonElement} */ (document.getElementById('btn-apply'));
-const platformRadios = /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="platform"]'));
+const ruleFilterInput = /** @type {HTMLInputElement} */ (document.getElementById('rule-filter-input'));
+const descriptionBox = document.getElementById('skill-description');
+const btnAddDir = document.getElementById('btn-add-dir');
+const btnAddRuleFile = document.getElementById('btn-add-rule-file');
+const btnCancel = document.getElementById('btn-cancel');
+const btnApply = document.getElementById('btn-apply');
+const platformRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
+  document.querySelectorAll('input[name="platform"]')
+);
 
-// --- Event listeners ---
-btnAddDir.addEventListener('click', () => {
-  vscode.postMessage({ command: 'addDirectory' });
-});
+btnAddDir.addEventListener('click', () => vscode.postMessage({ command: 'addDirectory' }));
+btnAddRuleFile.addEventListener('click', () => vscode.postMessage({ command: 'addRuleFile' }));
 
 btnCancel.addEventListener('click', () => {
-  // Reset to server state
-  checkedIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+  checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+  checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
   renderSkills();
+  renderRules();
 });
 
 btnApply.addEventListener('click', () => {
-  vscode.postMessage({ command: 'apply', skillIds: Array.from(checkedIds) });
-});
-
-filterInput.addEventListener('input', () => {
-  renderSkills();
-});
-
-platformRadios.forEach(radio => {
-  radio.addEventListener('change', () => {
-    currentPlatform = radio.value;
-    vscode.postMessage({ command: 'changePlatform', platform: currentPlatform });
+  vscode.postMessage({
+    command: 'apply',
+    skillIds: Array.from(checkedSkillIds),
+    ruleIds: Array.from(checkedRuleIds),
   });
 });
 
-// --- Message handler ---
-window.addEventListener('message', (event) => {
+filterInput.addEventListener('input', renderSkills);
+ruleFilterInput.addEventListener('input', renderRules);
+
+platformRadios.forEach(r =>
+  r.addEventListener('change', () => {
+    currentPlatform = r.value;
+    vscode.postMessage({ command: 'changePlatform', platform: currentPlatform });
+  }),
+);
+
+window.addEventListener('message', event => {
   const msg = event.data;
-  switch (msg.command) {
-    case 'update':
-      skills = msg.skills;
-      directories = msg.directories;
-      currentPlatform = msg.platform;
+  if (msg.command === 'update') {
+    skills = msg.skills;
+    rules = msg.rules;
+    directories = msg.directories;
+    ruleFiles = msg.ruleFiles;
+    currentPlatform = msg.platform;
 
-      // Initialize checked state from installed status
-      checkedIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+    checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+    checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
 
-      // Update platform radio
-      platformRadios.forEach(r => {
-        r.checked = r.value === currentPlatform;
-      });
+    platformRadios.forEach(r => (r.checked = r.value === currentPlatform));
 
-      renderDirectories();
-      renderSkills();
-      break;
-
-    case 'applyResult':
-      // Refresh will be triggered by extension after apply
-      break;
+    renderDirectories();
+    renderRuleFiles();
+    renderSkills();
+    renderRules();
   }
 });
 
-// --- Render functions ---
 function renderDirectories() {
   if (directories.length === 0) {
-    dirList.innerHTML = '<div class="empty-state">No directories configured. Click "+ Add Directory" to start.</div>';
+    dirList.innerHTML = '<div class="empty-state">No directories. Click "+ Add Directory" to start.</div>';
     return;
   }
-
-  dirList.innerHTML = directories.map(dir => `
+  dirList.innerHTML = directories
+    .map(
+      dir => `
     <div class="dir-item">
-      <span class="dir-path" title="${escapeHtml(dir)}">${escapeHtml(dir)}</span>
-      <button class="btn-remove" data-dir="${escapeAttr(dir)}" title="Remove directory">&times;</button>
-    </div>
-  `).join('');
-
-  // Attach remove handlers
+      <span class="dir-path" title="${esc(dir)}">${esc(dir)}</span>
+      <button class="btn-remove" data-dir="${escAttr(dir)}" title="Remove">×</button>
+    </div>`,
+    )
+    .join('');
   dirList.querySelectorAll('.btn-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', e => {
       const dir = /** @type {HTMLElement} */ (e.currentTarget).dataset.dir;
       vscode.postMessage({ command: 'removeDirectory', directory: dir });
     });
   });
 }
 
+function renderRuleFiles() {
+  if (ruleFiles.length === 0) {
+    ruleFileList.innerHTML = '<div class="empty-state">No rule files. Click "+ Add Rule File".</div>';
+    return;
+  }
+  ruleFileList.innerHTML = ruleFiles
+    .map(
+      file => `
+    <div class="dir-item">
+      <span class="dir-path" title="${esc(file)}">${esc(file)}</span>
+      <button class="btn-remove" data-file="${escAttr(file)}" title="Remove">×</button>
+    </div>`,
+    )
+    .join('');
+  ruleFileList.querySelectorAll('.btn-remove').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const file = /** @type {HTMLElement} */ (e.currentTarget).dataset.file;
+      vscode.postMessage({ command: 'removeRuleFile', file });
+    });
+  });
+}
+
 function renderSkills() {
   const filter = filterInput.value.toLowerCase().trim();
-
-  const filtered = skills.filter(s =>
-    !filter ||
-    s.name.toLowerCase().includes(filter) ||
-    s.description.toLowerCase().includes(filter)
+  const filtered = skills.filter(
+    s => !filter || s.name.toLowerCase().includes(filter) || s.description.toLowerCase().includes(filter),
   );
 
   if (filtered.length === 0) {
-    skillList.innerHTML = skills.length === 0
-      ? '<div class="empty-state">No skills found. Add a directory containing skill files.</div>'
-      : '<div class="empty-state">No skills match the filter.</div>';
+    skillList.innerHTML =
+      skills.length === 0
+        ? '<div class="empty-state">No skills found. Add a directory containing skill subfolders.</div>'
+        : '<div class="empty-state">No skills match the filter.</div>';
     return;
   }
 
-  skillList.innerHTML = filtered.map(skill => {
-    const checked = checkedIds.has(skill.id) ? 'checked' : '';
-    const selected = skill.id === selectedSkillId ? 'selected' : '';
-    const sourceLabel = getSourceLabel(skill.sourceDir);
+  skillList.innerHTML = filtered
+    .map(s => {
+      const checked = checkedSkillIds.has(s.id) ? 'checked' : '';
+      const selected = s.id === selectedItemId ? 'selected' : '';
+      return `
+        <div class="skill-item ${selected}" data-id="${escAttr(s.id)}" data-kind="skill">
+          <input type="checkbox" ${checked} data-id="${escAttr(s.id)}" data-kind="skill" />
+          <span class="skill-name">${esc(s.name)}</span>
+          <span class="skill-desc">${esc(truncate(s.description, 60))}</span>
+          <span class="skill-source">${esc(basename(s.sourceDir))}</span>
+        </div>`;
+    })
+    .join('');
 
-    return `
-      <div class="skill-item ${selected}" data-id="${escapeAttr(skill.id)}">
-        <input type="checkbox" ${checked} data-id="${escapeAttr(skill.id)}" />
-        <span class="skill-name">${escapeHtml(skill.name)}</span>
-        <span class="skill-desc">${escapeHtml(truncate(skill.description, 60))}</span>
-        <span class="skill-source">${escapeHtml(sourceLabel)}</span>
-      </div>
-    `;
-  }).join('');
-
-  // Attach click handlers
-  skillList.querySelectorAll('.skill-item').forEach(item => {
-    const id = /** @type {HTMLElement} */ (item).dataset.id;
-
-    // Click on row -> select for description
-    item.addEventListener('click', (e) => {
-      // Don't trigger on checkbox click
-      if (/** @type {HTMLElement} */ (e.target).tagName === 'INPUT') return;
-
-      selectedSkillId = id || null;
-      renderSkills();
-      showDescription(id || null);
-    });
-
-    // Checkbox change
-    const checkbox = /** @type {HTMLInputElement} */ (item.querySelector('input[type="checkbox"]'));
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) {
-        checkedIds.add(id || '');
-      } else {
-        checkedIds.delete(id || '');
-      }
-    });
-  });
-
-  // Update description if something is selected
-  if (selectedSkillId) {
-    showDescription(selectedSkillId);
-  }
+  attachListItemHandlers(skillList);
 }
 
-/**
- * @param {string|null} skillId
- */
-function showDescription(skillId) {
-  if (!skillId) {
-    descriptionBox.textContent = 'Select a skill to see its description.';
+function renderRules() {
+  const filter = ruleFilterInput.value.toLowerCase().trim();
+  const filtered = rules.filter(
+    r => !filter || r.name.toLowerCase().includes(filter) || r.description.toLowerCase().includes(filter),
+  );
+
+  if (filtered.length === 0) {
+    ruleList.innerHTML =
+      rules.length === 0
+        ? '<div class="empty-state">No rules. Add a rule file above.</div>'
+        : '<div class="empty-state">No rules match the filter.</div>';
     return;
   }
 
-  const skill = skills.find(s => s.id === skillId);
-  if (!skill) {
-    descriptionBox.textContent = 'Skill not found.';
+  ruleList.innerHTML = filtered
+    .map(r => {
+      const checked = checkedRuleIds.has(r.id) ? 'checked' : '';
+      const selected = r.id === selectedItemId ? 'selected' : '';
+      return `
+        <div class="skill-item ${selected}" data-id="${escAttr(r.id)}" data-kind="rule">
+          <input type="checkbox" ${checked} data-id="${escAttr(r.id)}" data-kind="rule" />
+          <span class="skill-name">${esc(r.name)}</span>
+          <span class="skill-desc">${esc(truncate(r.description, 60))}</span>
+          <span class="skill-source">${esc(basename(r.sourcePath))}</span>
+        </div>`;
+    })
+    .join('');
+
+  attachListItemHandlers(ruleList);
+}
+
+function attachListItemHandlers(container) {
+  container.querySelectorAll('.skill-item').forEach(item => {
+    const id = /** @type {HTMLElement} */ (item).dataset.id;
+    const kind = /** @type {HTMLElement} */ (item).dataset.kind;
+
+    item.addEventListener('click', e => {
+      if (/** @type {HTMLElement} */ (e.target).tagName === 'INPUT') return;
+      selectedItemId = id;
+      renderSkills();
+      renderRules();
+      showDescription(id, kind);
+    });
+
+    const checkbox = /** @type {HTMLInputElement} */ (item.querySelector('input[type="checkbox"]'));
+    checkbox.addEventListener('change', () => {
+      const set = kind === 'rule' ? checkedRuleIds : checkedSkillIds;
+      if (checkbox.checked) set.add(id);
+      else set.delete(id);
+    });
+  });
+}
+
+function showDescription(id, kind) {
+  const item = kind === 'rule' ? rules.find(r => r.id === id) : skills.find(s => s.id === id);
+  if (!item) {
+    descriptionBox.textContent = 'Item not found.';
     return;
   }
 
   const lines = [
-    `Name: ${skill.name}`,
-    `Description: ${skill.description}`,
-    `Source: ${skill.sourceDir}`,
-    `Format: ${skill.format}`,
-    `Status: ${skill.isInstalled ? 'Installed' : 'Not installed'}`,
+    `Type: ${kind === 'rule' ? 'Rule' : 'Skill'}`,
+    `Name: ${item.name}`,
+    `Description: ${item.description}`,
+    `Source: ${item.sourcePath}`,
+    `Status: ${item.isInstalled ? 'Installed' : 'Not installed'}`,
     '',
     '--- Content ---',
     '',
-    skill.body || '(no content)',
+    item.body || '(no content)',
   ];
-
   descriptionBox.textContent = lines.join('\n');
 }
 
-// --- Helpers ---
-/**
- * @param {string} dir
- * @returns {string}
- */
-function getSourceLabel(dir) {
-  const parts = dir.replace(/\\/g, '/').split('/');
-  return parts[parts.length - 1] || dir;
+function basename(p) {
+  const parts = p.replace(/\\/g, '/').split('/');
+  return parts[parts.length - 1] || p;
+}
+function truncate(s, max) {
+  return s.length > max ? s.slice(0, max) + '...' : s;
+}
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function escAttr(s) {
+  return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-/**
- * @param {string} str
- * @param {number} max
- * @returns {string}
- */
-function truncate(str, max) {
-  return str.length > max ? str.slice(0, max) + '...' : str;
-}
-
-/**
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/**
- * @param {string} str
- * @returns {string}
- */
-function escapeAttr(str) {
-  return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-// --- Init ---
 vscode.postMessage({ command: 'ready' });

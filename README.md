@@ -1,6 +1,6 @@
 # Lazy Skill AI Agent
 
-A tool to manage AI skills for **Claude Code** and **Antigravity**. Browse skills from multiple source directories and add/remove them from your project through a visual interface.
+A tool to manage AI skills **and rules** for **Claude Code**, **Antigravity**, and **Cursor**. Browse skills from multiple source directories and rule files, then add/remove them in your project through a visual interface.
 
 ![Lazy Skill Manager screenshot](Resource/image.png)
 
@@ -42,8 +42,25 @@ When applied, the **entire skill folder** (markdown, scripts, helpers — everyt
 |----------|--------------------------|
 | **Claude Code** | `{project}/.claude/skills/{skill-name}/` |
 | **Antigravity** | `{project}/.agent/skills/{skill-name}/` |
+| **Cursor** | `{project}/.cursor/skills/{skill-name}/` |
 
 The platform toggle at the top of the UI controls which folder is read from / written to. Switching platforms updates the install state of each skill in the list accordingly.
+
+## Rule Files
+
+In addition to skills, you can also manage **rule files** — single `.md` / `.mdc` / `.txt` files that get copied into the workspace's rules directory.
+
+Add rule files individually via **+ Add Rule File** (multi-select supported), then check the rules you want included in the project.
+
+| Platform | Workspace Rules Folder |
+|----------|--------------------------|
+| **Claude Code** | `{project}/.claude/rules/{rule-name}.md` |
+| **Antigravity** | `{project}/.agents/rules/{rule-name}.md` |
+| **Cursor** | `{project}/.cursor/rules/{rule-name}.md` |
+
+> Note: Antigravity uses `.agent/skills/` (singular) for skills but `.agents/rules/` (plural) for rules — this matches Antigravity's own conventions.
+
+A rule's name is taken from its frontmatter `name` field (or the filename if no frontmatter). The original file extension is preserved on install.
 
 ---
 
@@ -124,6 +141,7 @@ Get the latest installer from the [GitHub Releases](../../releases) page:
 | OS | File |
 |----|------|
 | Windows | `Lazy Skill AI Agent Setup X.Y.Z.exe` |
+| macOS | `Lazy Skill AI Agent-X.Y.Z.dmg` (built via GitHub Actions) |
 | Linux | `lazy-skill-ai-agent-app-X.Y.Z.tar.gz` |
 
 ### Run in Development Mode
@@ -166,9 +184,11 @@ Installers are placed in `app/dist/`.
 
 1. Launch the app
 2. Click **Browse...** to select your project folder
-3. Click **+ Add Directory** to add a directory containing skills
-4. Check the skills you want to include in the project
-5. Click **Apply**
+3. Pick a target platform (Claude Code / Antigravity / Cursor)
+4. Click **+ Add Directory** to add a directory containing skill subfolders
+5. Click **+ Add Rule File** to add individual rule files
+6. Check the skills + rules you want to include
+7. Click **Apply**
 
 ---
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { SkillInfo, TargetPlatform } from './types';
-import { getSkillsDir } from './skillInstaller';
+import { RuleInfo, SkillInfo, TargetPlatform } from './types';
+import { getRulesDir, getSkillsDir } from './skillInstaller';
 
 interface Frontmatter {
   name?: string;
@@ -135,4 +135,60 @@ export function markInstalled(skills: SkillInfo[], installedNames: string[]): Sk
     ...skill,
     isInstalled: installedSet.has(skill.name),
   }));
+}
+
+// --- Rules ---
+
+export async function scanRuleFiles(files: string[]): Promise<RuleInfo[]> {
+  const rules: RuleInfo[] = [];
+
+  for (const filePath of files) {
+    try {
+      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+      if (stat.type !== vscode.FileType.File) continue;
+
+      const contentBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+      const content = Buffer.from(contentBytes).toString('utf-8');
+      const { frontmatter, body } = parseFrontmatter(content);
+
+      const ext = path.extname(filePath);
+      const baseName = path.basename(filePath, ext);
+      const name = (frontmatter.name as string) || baseName;
+      const description =
+        (frontmatter.description as string) || body.split('\n').find(l => l.trim()) || '';
+
+      rules.push({
+        id: `rule:${filePath}`,
+        name,
+        description,
+        sourcePath: filePath,
+        isInstalled: false,
+        body,
+      });
+    } catch {
+      // skip unreadable
+    }
+  }
+
+  return rules;
+}
+
+export async function getInstalledRuleNames(
+  projectPath: string,
+  platform: TargetPlatform,
+): Promise<string[]> {
+  const rulesDir = getRulesDir(projectPath, platform);
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(rulesDir));
+    return entries
+      .filter(([name, type]) => type === vscode.FileType.File && /\.(md|mdc|txt)$/i.test(name))
+      .map(([name]) => path.basename(name, path.extname(name)));
+  } catch {
+    return [];
+  }
+}
+
+export function markRulesInstalled(rules: RuleInfo[], installedNames: string[]): RuleInfo[] {
+  const set = new Set(installedNames);
+  return rules.map(r => ({ ...r, isInstalled: set.has(r.name) }));
 }

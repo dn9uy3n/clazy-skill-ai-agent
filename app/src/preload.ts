@@ -1,23 +1,42 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { AppConfig, SkillInfo, TargetPlatform } from './types';
+import { AppConfig, RuleInfo, SkillInfo, TargetPlatform } from './types';
 
 const api = {
   loadConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:load'),
   saveConfig: (config: AppConfig): Promise<void> => ipcRenderer.invoke('config:save', config),
   selectDirectory: (title: string): Promise<string | null> =>
     ipcRenderer.invoke('dialog:selectDirectory', title),
+  selectFiles: (title: string): Promise<string[]> => ipcRenderer.invoke('dialog:selectFiles', title),
   scanSkills: (
-    dirs: string[],
+    skillDirs: string[],
+    ruleFiles: string[],
     projectPath: string | undefined,
     platform: TargetPlatform,
-  ): Promise<SkillInfo[]> => ipcRenderer.invoke('skills:scan', dirs, projectPath, platform),
+  ): Promise<{ skills: SkillInfo[]; rules: RuleInfo[] }> =>
+    ipcRenderer.invoke('skills:scan', skillDirs, ruleFiles, projectPath, platform),
   applyChanges: (
     allSkills: SkillInfo[],
-    selectedIds: string[],
+    selectedSkillIds: string[],
+    allRules: RuleInfo[],
+    selectedRuleIds: string[],
     projectPath: string,
     platform: TargetPlatform,
-  ): Promise<{ installed: number; removed: number; errors: string[] }> =>
-    ipcRenderer.invoke('skills:apply', allSkills, selectedIds, projectPath, platform),
+  ): Promise<{
+    skillsInstalled: number;
+    skillsRemoved: number;
+    rulesInstalled: number;
+    rulesRemoved: number;
+    errors: string[];
+  }> =>
+    ipcRenderer.invoke(
+      'skills:apply',
+      allSkills,
+      selectedSkillIds,
+      allRules,
+      selectedRuleIds,
+      projectPath,
+      platform,
+    ),
 };
 
 contextBridge.exposeInMainWorld('lazyApi', api);

@@ -1,7 +1,22 @@
 import * as vscode from 'vscode';
-import { SkillInfo, TargetPlatform, WebviewMessage, ExtensionMessage } from './types';
-import { scanDirectories, getInstalledSkillNames, markInstalled } from './skillScanner';
+import {
+  ExtensionMessage,
+  RuleInfo,
+  SkillInfo,
+  TargetPlatform,
+  WebviewMessage,
+} from './types';
+import {
+  scanDirectories,
+  scanRuleFiles,
+  getInstalledSkillNames,
+  getInstalledRuleNames,
+  markInstalled,
+  markRulesInstalled,
+} from './skillScanner';
 import { applyChanges } from './skillInstaller';
+
+const CONFIG_NS = 'lazy-skill-ai-agent';
 
 export class LazySkillPanel {
   public static readonly viewType = 'lazySkillManager';
@@ -12,6 +27,7 @@ export class LazySkillPanel {
   private disposables: vscode.Disposable[] = [];
   private currentPlatform: TargetPlatform = 'claude-code';
   private skills: SkillInfo[] = [];
+  private rules: RuleInfo[] = [];
 
   public static createOrShow(extensionUri: vscode.Uri): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
@@ -38,7 +54,6 @@ export class LazySkillPanel {
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
     this.extensionUri = extensionUri;
-
     this.panel.webview.html = this.getHtml();
 
     this.panel.webview.onDidReceiveMessage(
@@ -53,9 +68,7 @@ export class LazySkillPanel {
   private dispose(): void {
     LazySkillPanel.instance = undefined;
     this.panel.dispose();
-    for (const d of this.disposables) {
-      d.dispose();
-    }
+    for (const d of this.disposables) d.dispose();
     this.disposables = [];
   }
 
@@ -64,30 +77,41 @@ export class LazySkillPanel {
   }
 
   private getDirectories(): string[] {
-    const config = vscode.workspace.getConfiguration('lazy-skill-ai-agent');
-    return config.get<string[]>('skillDirectories', []);
+    return vscode.workspace.getConfiguration(CONFIG_NS).get<string[]>('skillDirectories', []);
+  }
+
+  private getRuleFiles(): string[] {
+    return vscode.workspace.getConfiguration(CONFIG_NS).get<string[]>('ruleFiles', []);
   }
 
   private async refresh(): Promise<void> {
     const dirs = this.getDirectories();
+    const ruleFiles = this.getRuleFiles();
     const projectPath = this.getProjectPath();
 
     this.skills = await scanDirectories(dirs);
+    this.rules = await scanRuleFiles(ruleFiles);
 
     if (projectPath) {
-      const installed = await getInstalledSkillNames(projectPath, this.currentPlatform);
-      this.skills = markInstalled(this.skills, installed);
+      const installedSkills = await getInstalledSkillNames(projectPath, this.currentPlatform);
+      this.skills = markInstalled(this.skills, installedSkills);
+      const installedRules = await getInstalledRuleNames(projectPath, this.currentPlatform);
+      this.rules = markRulesInstalled(this.rules, installedRules);
     }
 
     this.postMessage({
       command: 'update',
       skills: this.skills,
+      rules: this.rules,
       directories: dirs,
+      ruleFiles,
       platform: this.currentPlatform,
     });
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
+    const config = vscode.workspace.getConfiguration(CONFIG_NS);
+
     switch (msg.command) {
       case 'ready':
         await this.refresh();
@@ -110,7 +134,6 @@ export class LazySkillPanel {
           const newDir = uris[0].fsPath;
           if (!dirs.includes(newDir)) {
             dirs.push(newDir);
-            const config = vscode.workspace.getConfiguration('lazy-skill-ai-agent');
             await config.update('skillDirectories', dirs, vscode.ConfigurationTarget.Global);
           }
           await this.refresh();
@@ -120,8 +143,34 @@ export class LazySkillPanel {
 
       case 'removeDirectory': {
         const dirs = this.getDirectories().filter(d => d !== msg.directory);
-        const config = vscode.workspace.getConfiguration('lazy-skill-ai-agent');
         await config.update('skillDirectories', dirs, vscode.ConfigurationTarget.Global);
+        await this.refresh();
+        break;
+      }
+
+      case 'addRuleFile': {
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFolders: false,
+          canSelectFiles: true,
+          canSelectMany: true,
+          openLabel: 'Select Rule File(s)',
+          filters: { 'Rule files': ['md', 'mdc', 'txt'], 'All files': ['*'] },
+        });
+        if (uris && uris.length > 0) {
+          const existing = this.getRuleFiles();
+          const merged = [...existing];
+          for (const uri of uris) {
+            if (!merged.includes(uri.fsPath)) merged.push(uri.fsPath);
+          }
+          await config.update('ruleFiles', merged, vscode.ConfigurationTarget.Global);
+          await this.refresh();
+        }
+        break;
+      }
+
+      case 'removeRuleFile': {
+        const files = this.getRuleFiles().filter(f => f !== msg.file);
+        await config.update('ruleFiles', files, vscode.ConfigurationTarget.Global);
         await this.refresh();
         break;
       }
@@ -133,13 +182,21 @@ export class LazySkillPanel {
           return;
         }
 
-        const selectedIds = new Set(msg.skillIds);
-        const result = await applyChanges(this.skills, selectedIds, projectPath, this.currentPlatform);
+        const result = await applyChanges(
+          this.skills,
+          new Set(msg.skillIds),
+          this.rules,
+          new Set(msg.ruleIds),
+          projectPath,
+          this.currentPlatform,
+        );
 
         this.postMessage({
           command: 'applyResult',
-          installed: result.installed,
-          removed: result.removed,
+          skillsInstalled: result.skillsInstalled,
+          skillsRemoved: result.skillsRemoved,
+          rulesInstalled: result.rulesInstalled,
+          rulesRemoved: result.rulesRemoved,
           errors: result.errors,
         });
 
@@ -147,7 +204,7 @@ export class LazySkillPanel {
           vscode.window.showWarningMessage(`Applied with errors: ${result.errors.join('; ')}`);
         } else {
           vscode.window.showInformationMessage(
-            `Skills updated: ${result.installed} installed, ${result.removed} removed.`,
+            `Skills: +${result.skillsInstalled}/-${result.skillsRemoved} · Rules: +${result.rulesInstalled}/-${result.rulesRemoved}`,
           );
         }
 
@@ -190,6 +247,10 @@ export class LazySkillPanel {
         <input type="radio" name="platform" value="antigravity">
         Antigravity
       </label>
+      <label class="radio-label">
+        <input type="radio" name="platform" value="cursor">
+        Cursor
+      </label>
     </section>
 
     <section class="directories-section">
@@ -206,9 +267,23 @@ export class LazySkillPanel {
       <div id="skill-list" class="skill-list"></div>
     </section>
 
+    <section class="directories-section">
+      <h3>Rule Files</h3>
+      <div id="rule-file-list"></div>
+      <button id="btn-add-rule-file" class="btn btn-secondary">+ Add Rule File</button>
+    </section>
+
+    <section class="skills-section">
+      <div class="skills-header">
+        <h3>Available Rules</h3>
+        <input type="text" id="rule-filter-input" placeholder="Filter rules..." />
+      </div>
+      <div id="rule-list" class="skill-list"></div>
+    </section>
+
     <section class="description-section">
       <h3>Description</h3>
-      <div id="skill-description" class="description-box">Select a skill to see its description.</div>
+      <div id="skill-description" class="description-box">Select an item to see its description.</div>
     </section>
 
     <section class="actions-section">

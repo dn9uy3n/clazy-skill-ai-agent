@@ -1,26 +1,25 @@
 // @ts-check
 const api = window.lazyApi;
 
-/** @typedef {{id:string,name:string,description:string,sourcePath:string,sourceDir:string,format:string,isInstalled:boolean,body:string}} SkillInfo */
-
-/** @type {{skillDirectories:string[], lastProjectPath?:string, platform:string}} */
-let config = { skillDirectories: [], platform: 'claude-code' };
-/** @type {SkillInfo[]} */
+let config = { skillDirectories: [], ruleFiles: [], platform: 'claude-code' };
 let skills = [];
-/** @type {string|null} */
-let selectedSkillId = null;
-/** @type {Set<string>} */
-let checkedIds = new Set();
+let rules = [];
+let selectedItemId = null;
+let checkedSkillIds = new Set();
+let checkedRuleIds = new Set();
 
-// DOM
 const projectPathEl = document.getElementById('project-path');
 const dirList = document.getElementById('dir-list');
+const ruleFileList = document.getElementById('rule-file-list');
 const skillList = document.getElementById('skill-list');
+const ruleList = document.getElementById('rule-list');
 const filterInput = document.getElementById('filter-input');
+const ruleFilterInput = document.getElementById('rule-filter-input');
 const descriptionBox = document.getElementById('skill-description');
 const statusMsg = document.getElementById('status-msg');
 const btnSelectProject = document.getElementById('btn-select-project');
 const btnAddDir = document.getElementById('btn-add-dir');
+const btnAddRuleFile = document.getElementById('btn-add-rule-file');
 const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
 
@@ -42,9 +41,28 @@ btnAddDir.addEventListener('click', async () => {
   }
 });
 
+btnAddRuleFile.addEventListener('click', async () => {
+  const files = await api.selectFiles('Select Rule File(s)');
+  if (files && files.length) {
+    let added = false;
+    for (const f of files) {
+      if (!config.ruleFiles.includes(f)) {
+        config.ruleFiles.push(f);
+        added = true;
+      }
+    }
+    if (added) {
+      await api.saveConfig(config);
+      await refresh();
+    }
+  }
+});
+
 btnCancel.addEventListener('click', () => {
-  checkedIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+  checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+  checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
   renderSkills();
+  renderRules();
   setStatus('');
 });
 
@@ -54,20 +72,30 @@ btnApply.addEventListener('click', async () => {
     return;
   }
   setStatus('Applying...');
-  const result = await api.applyChanges(skills, Array.from(checkedIds), config.lastProjectPath, config.platform);
+  const result = await api.applyChanges(
+    skills,
+    Array.from(checkedSkillIds),
+    rules,
+    Array.from(checkedRuleIds),
+    config.lastProjectPath,
+    config.platform,
+  );
   if (result.errors.length > 0) {
     setStatus(`Done with errors: ${result.errors.join('; ')}`, true);
   } else {
-    setStatus(`Installed: ${result.installed}, Removed: ${result.removed}`);
+    setStatus(
+      `Skills: +${result.skillsInstalled}/-${result.skillsRemoved} · Rules: +${result.rulesInstalled}/-${result.rulesRemoved}`,
+    );
   }
   await refresh();
 });
 
 filterInput.addEventListener('input', renderSkills);
+ruleFilterInput.addEventListener('input', renderRules);
 
 document.querySelectorAll('input[name="platform"]').forEach(r => {
-  r.addEventListener('change', async (e) => {
-    config.platform = /** @type {HTMLInputElement} */ (e.target).value;
+  r.addEventListener('change', async e => {
+    config.platform = e.target.value;
     await api.saveConfig(config);
     await refresh();
   });
@@ -75,88 +103,131 @@ document.querySelectorAll('input[name="platform"]').forEach(r => {
 
 async function init() {
   config = await api.loadConfig();
-  document.querySelectorAll('input[name="platform"]').forEach(r => {
-    /** @type {HTMLInputElement} */ (r).checked =
-      /** @type {HTMLInputElement} */ (r).value === config.platform;
-  });
+  document
+    .querySelectorAll('input[name="platform"]')
+    .forEach(r => (r.checked = r.value === config.platform));
   await refresh();
 }
 
 async function refresh() {
   projectPathEl.textContent = config.lastProjectPath || 'No project selected';
   renderDirectories();
+  renderRuleFiles();
 
-  skills = await api.scanSkills(config.skillDirectories, config.lastProjectPath, config.platform);
-  checkedIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+  const result = await api.scanSkills(
+    config.skillDirectories,
+    config.ruleFiles,
+    config.lastProjectPath,
+    config.platform,
+  );
+  skills = result.skills;
+  rules = result.rules;
+  checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+  checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
   renderSkills();
+  renderRules();
 }
 
 function renderDirectories() {
+  dirList.innerHTML = '';
   if (config.skillDirectories.length === 0) {
     dirList.innerHTML = '<div class="empty-state">No directories configured.</div>';
     return;
   }
-  dirList.innerHTML = '';
   for (const dir of config.skillDirectories) {
     const item = document.createElement('div');
     item.className = 'dir-item';
-    const pathSpan = document.createElement('span');
-    pathSpan.className = 'dir-path';
-    pathSpan.textContent = dir;
-    pathSpan.title = dir;
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'btn-remove';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'Remove';
-    removeBtn.addEventListener('click', async () => {
+    const span = document.createElement('span');
+    span.className = 'dir-path';
+    span.textContent = dir;
+    span.title = dir;
+    const btn = document.createElement('button');
+    btn.className = 'btn-remove';
+    btn.textContent = '×';
+    btn.addEventListener('click', async () => {
       config.skillDirectories = config.skillDirectories.filter(d => d !== dir);
       await api.saveConfig(config);
       await refresh();
     });
-    item.appendChild(pathSpan);
-    item.appendChild(removeBtn);
+    item.appendChild(span);
+    item.appendChild(btn);
     dirList.appendChild(item);
   }
 }
 
+function renderRuleFiles() {
+  ruleFileList.innerHTML = '';
+  if (config.ruleFiles.length === 0) {
+    ruleFileList.innerHTML = '<div class="empty-state">No rule files added.</div>';
+    return;
+  }
+  for (const file of config.ruleFiles) {
+    const item = document.createElement('div');
+    item.className = 'dir-item';
+    const span = document.createElement('span');
+    span.className = 'dir-path';
+    span.textContent = file;
+    span.title = file;
+    const btn = document.createElement('button');
+    btn.className = 'btn-remove';
+    btn.textContent = '×';
+    btn.addEventListener('click', async () => {
+      config.ruleFiles = config.ruleFiles.filter(f => f !== file);
+      await api.saveConfig(config);
+      await refresh();
+    });
+    item.appendChild(span);
+    item.appendChild(btn);
+    ruleFileList.appendChild(item);
+  }
+}
+
 function renderSkills() {
-  const filter = filterInput.value.toLowerCase().trim();
-  const filtered = skills.filter(s =>
-    !filter || s.name.toLowerCase().includes(filter) || s.description.toLowerCase().includes(filter),
+  renderItemList(skillList, skills, filterInput.value, checkedSkillIds, 'skill', 'Add a skill directory above.');
+}
+
+function renderRules() {
+  renderItemList(ruleList, rules, ruleFilterInput.value, checkedRuleIds, 'rule', 'Add a rule file above.');
+}
+
+function renderItemList(container, items, filterText, checkedSet, kind, emptyHint) {
+  const filter = filterText.toLowerCase().trim();
+  const filtered = items.filter(
+    i => !filter || i.name.toLowerCase().includes(filter) || i.description.toLowerCase().includes(filter),
   );
 
+  container.innerHTML = '';
   if (filtered.length === 0) {
-    skillList.innerHTML = skills.length === 0
-      ? '<div class="empty-state">No skills found. Add a directory with skill subfolders.</div>'
-      : '<div class="empty-state">No skills match the filter.</div>';
+    container.innerHTML = `<div class="empty-state">${
+      items.length === 0 ? emptyHint : 'No matches.'
+    }</div>`;
     return;
   }
 
-  skillList.innerHTML = '';
-  for (const skill of filtered) {
+  for (const item of filtered) {
     const row = document.createElement('div');
-    row.className = 'skill-item' + (skill.id === selectedSkillId ? ' selected' : '');
+    row.className = 'skill-item' + (item.id === selectedItemId ? ' selected' : '');
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.checked = checkedIds.has(skill.id);
+    checkbox.checked = checkedSet.has(item.id);
     checkbox.addEventListener('click', e => e.stopPropagation());
     checkbox.addEventListener('change', () => {
-      if (checkbox.checked) checkedIds.add(skill.id);
-      else checkedIds.delete(skill.id);
+      if (checkbox.checked) checkedSet.add(item.id);
+      else checkedSet.delete(item.id);
     });
 
     const name = document.createElement('span');
     name.className = 'skill-name';
-    name.textContent = skill.name;
+    name.textContent = item.name;
 
     const desc = document.createElement('span');
     desc.className = 'skill-desc';
-    desc.textContent = truncate(skill.description, 60);
+    desc.textContent = truncate(item.description, 60);
 
     const source = document.createElement('span');
     source.className = 'skill-source';
-    source.textContent = basename(skill.sourceDir);
+    source.textContent = basename(kind === 'rule' ? item.sourcePath : item.sourceDir);
 
     row.appendChild(checkbox);
     row.appendChild(name);
@@ -164,37 +235,38 @@ function renderSkills() {
     row.appendChild(source);
 
     row.addEventListener('click', () => {
-      selectedSkillId = skill.id;
+      selectedItemId = item.id;
       renderSkills();
-      showDescription(skill);
+      renderRules();
+      showDescription(item, kind);
     });
 
-    skillList.appendChild(row);
+    container.appendChild(row);
   }
 }
 
-/** @param {SkillInfo} skill */
-function showDescription(skill) {
+function showDescription(item, kind) {
   descriptionBox.textContent = [
-    `Name: ${skill.name}`,
-    `Description: ${skill.description}`,
-    `Source: ${skill.sourceDir}`,
-    `Format: ${skill.format}`,
-    `Status: ${skill.isInstalled ? 'Installed' : 'Not installed'}`,
+    `Type: ${kind === 'rule' ? 'Rule' : 'Skill'}`,
+    `Name: ${item.name}`,
+    `Description: ${item.description}`,
+    `Source: ${item.sourcePath}`,
+    `Status: ${item.isInstalled ? 'Installed' : 'Not installed'}`,
     '',
     '--- Content ---',
     '',
-    skill.body || '(no content)',
+    item.body || '(no content)',
   ].join('\n');
 }
 
-/** @param {string} msg @param {boolean} [isError] */
 function setStatus(msg, isError) {
   statusMsg.textContent = msg;
   statusMsg.style.color = isError ? 'var(--error)' : 'var(--text-muted)';
 }
 
-function truncate(s, max) { return s.length > max ? s.slice(0, max) + '...' : s; }
+function truncate(s, max) {
+  return s.length > max ? s.slice(0, max) + '...' : s;
+}
 function basename(p) {
   const parts = p.replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || p;

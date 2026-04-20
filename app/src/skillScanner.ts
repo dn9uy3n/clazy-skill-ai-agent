@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { SkillInfo, TargetPlatform } from './types';
-import { getSkillsDir } from './skillInstaller';
+import { RuleInfo, SkillInfo, TargetPlatform } from './types';
+import { getRulesDir, getSkillsDir } from './skillInstaller';
 
 interface Frontmatter {
   name?: string;
@@ -135,4 +135,67 @@ export async function getInstalledSkillNames(
 export function markInstalled(skills: SkillInfo[], installedNames: string[]): SkillInfo[] {
   const set = new Set(installedNames);
   return skills.map(s => ({ ...s, isInstalled: set.has(s.name) }));
+}
+
+// --- Rules ---
+
+export async function scanRuleFiles(files: string[]): Promise<RuleInfo[]> {
+  const rules: RuleInfo[] = [];
+
+  for (const filePath of files) {
+    try {
+      const stat = await fs.stat(filePath);
+      if (!stat.isFile()) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const { frontmatter, body } = parseFrontmatter(content);
+
+      const ext = path.extname(filePath);
+      const baseName = path.basename(filePath, ext);
+      const name = (frontmatter.name as string) || baseName;
+      const description =
+        (frontmatter.description as string) || body.split('\n').find(l => l.trim()) || '';
+
+      rules.push({
+        id: `rule:${filePath}`,
+        name,
+        description,
+        sourcePath: filePath,
+        isInstalled: false,
+        body,
+      });
+    } catch {
+      // skip
+    }
+  }
+
+  return rules;
+}
+
+export async function getInstalledRuleNames(
+  projectPath: string,
+  platform: TargetPlatform,
+): Promise<string[]> {
+  const rulesDir = getRulesDir(projectPath, platform);
+  try {
+    const entries = await fs.readdir(rulesDir);
+    const names: string[] = [];
+    for (const name of entries) {
+      if (!/\.(md|mdc|txt)$/i.test(name)) continue;
+      try {
+        const stat = await fs.stat(path.join(rulesDir, name));
+        if (stat.isFile()) names.push(path.basename(name, path.extname(name)));
+      } catch {
+        // skip
+      }
+    }
+    return names;
+  } catch {
+    return [];
+  }
+}
+
+export function markRulesInstalled(rules: RuleInfo[], installedNames: string[]): RuleInfo[] {
+  const set = new Set(installedNames);
+  return rules.map(r => ({ ...r, isInstalled: set.has(r.name) }));
 }
