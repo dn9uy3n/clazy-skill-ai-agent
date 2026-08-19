@@ -29,7 +29,10 @@ npm run package   # Build .vsix
   handle block scalars (`>-`, `|`) and quoted scalars that wrap across lines; a naive
   line-by-line `indexOf(':')` reader silently mangles most real skill descriptions.
 - Scan results carry no markdown `body`; the webview requests one per item via `getBody`.
-- Any path the webview asks to read is validated against the configured directories first.
+- Any path the webview asks to read is validated against the configured directories first,
+  using `fs.promises.realpath` — a lexical `path.resolve` check accepts a symlink inside a
+  skill directory that points anywhere on disk. This is the sole documented exception to the
+  `vscode.workspace.fs` rule above, since that API has no realpath equivalent.
 - All styles use `--vscode-*` CSS variables for theme compatibility.
 - Target: `{project}/.claude/skills/{skill-name}/` (entire skill directory is copied, preserving markdown + scripts).
 

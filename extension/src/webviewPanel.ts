@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import {
   DirStat,
@@ -23,6 +24,19 @@ const CONFIG_NS = 'lazy-skill-ai-agent';
 
 /** Sync clients and editors write in bursts; collapse them into one re-scan. */
 const WATCH_DEBOUNCE_MS = 800;
+
+/** Windows paths compare case-insensitively; POSIX paths do not. */
+function normalizePath(p: string): string {
+  return process.platform === 'win32' ? p.toLowerCase() : p;
+}
+
+async function realPathOrNull(p: string): Promise<string | null> {
+  try {
+    return await fs.promises.realpath(p);
+  } catch {
+    return null;
+  }
+}
 
 export class LazySkillPanel {
   public static readonly viewType = 'lazySkillManager';
@@ -203,21 +217,29 @@ export class LazySkillPanel {
   /**
    * Only documents under a configured skill directory (or a configured rule
    * file) may be read, so a webview message can't turn into an arbitrary file
-   * read. Paths are resolved first so `..` segments can't step outside.
+   * read.
+   *
+   * Paths are resolved with realpath, not lexically: a lexical check accepts
+   * `<skillDir>/link` even when `link` is a symlink pointing anywhere on disk.
+   * This is the one place Node's `fs` is used instead of `vscode.workspace.fs`,
+   * which has no realpath equivalent.
    */
-  private isReadable(sourcePath: string): boolean {
-    const target = path.resolve(sourcePath);
-    const sameFs = (a: string, b: string) =>
-      process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  private async isReadable(sourcePath: string): Promise<boolean> {
+    const real = await realPathOrNull(sourcePath);
+    if (!real) return false;
 
-    const inDir = this.getDirectories().some(dir => {
-      const root = path.resolve(dir);
-      const rel = path.relative(root, target);
-      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    const target = normalizePath(real);
+
+    const dirs = await Promise.all(this.getDirectories().map(realPathOrNull));
+    const inDir = dirs.some(dir => {
+      if (!dir) return false;
+      const root = normalizePath(dir);
+      return target === root || target.startsWith(root + path.sep);
     });
     if (inDir) return true;
 
-    return this.getRuleFiles().some(file => sameFs(path.resolve(file), target));
+    const files = await Promise.all(this.getRuleFiles().map(realPathOrNull));
+    return files.some(file => file !== null && normalizePath(file) === target);
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -230,7 +252,7 @@ export class LazySkillPanel {
         break;
 
       case 'getBody': {
-        if (!this.isReadable(msg.sourcePath)) {
+        if (!(await this.isReadable(msg.sourcePath))) {
           this.postMessage({
             command: 'body',
             id: msg.id,
