@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Resource/logo/icon-256.png" width="128" height="128" alt="Lazy Skill AI Agent logo">
+</p>
+
 # Lazy Skill AI Agent
 
 A tool to manage AI skills **and rules** for **Claude Code**, **Antigravity**, and **Cursor**. Browse skills from multiple source directories and rule files, then add/remove them in your project through a visual interface.

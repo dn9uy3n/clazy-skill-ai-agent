@@ -1,6 +1,19 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { RuleInfo, SkillInfo, TargetPlatform } from './types';
+import { readDocHead, toDisplayString } from './frontmatter';
+
+/**
+ * A skill's display name comes from third-party frontmatter, so strip anything
+ * that could escape the target directory or be rejected by the filesystem.
+ */
+export function sanitizeName(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\.+$/, '')
+    .trim();
+  return cleaned || 'unnamed-skill';
+}
 
 /**
  * Workspace skill folder per platform:
@@ -102,22 +115,9 @@ export async function generateSkillsIndex(
     let name = folderName;
     let description = '';
     try {
-      const bytes = await vscode.workspace.fs.readFile(
-        vscode.Uri.file(path.join(folderPath, primary)),
-      );
-      const content = Buffer.from(bytes).toString('utf-8');
-      const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      if (match) {
-        for (const line of match[1].split(/\r?\n/)) {
-          const idx = line.indexOf(':');
-          if (idx === -1) continue;
-          const key = line.slice(0, idx).trim();
-          let value = line.slice(idx + 1).trim();
-          if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-          if (key === 'name') name = value;
-          else if (key === 'description') description = value;
-        }
-      }
+      const { frontmatter } = await readDocHead(path.join(folderPath, primary));
+      name = toDisplayString(frontmatter.name) || folderName;
+      description = toDisplayString(frontmatter.description);
     } catch {
       // unreadable — use folder name only
     }
@@ -177,7 +177,7 @@ export async function installSkill(
   await ensureDir(skillsDir);
 
   const sourceDir = path.dirname(skill.sourcePath);
-  const targetDir = path.join(skillsDir, skill.name);
+  const targetDir = path.join(skillsDir, sanitizeName(skill.name));
 
   try {
     await vscode.workspace.fs.delete(vscode.Uri.file(targetDir), {
@@ -200,7 +200,7 @@ export async function uninstallSkill(
   projectPath: string,
   platform: TargetPlatform,
 ): Promise<void> {
-  const targetDir = path.join(getSkillsDir(projectPath, platform), skillName);
+  const targetDir = path.join(getSkillsDir(projectPath, platform), sanitizeName(skillName));
   try {
     await vscode.workspace.fs.delete(vscode.Uri.file(targetDir), {
       recursive: true,
@@ -222,7 +222,7 @@ export async function installRule(
   await ensureDir(rulesDir);
 
   const ext = path.extname(rule.sourcePath) || '.md';
-  const targetFile = path.join(rulesDir, `${rule.name}${ext}`);
+  const targetFile = path.join(rulesDir, `${sanitizeName(rule.name)}${ext}`);
 
   await vscode.workspace.fs.copy(
     vscode.Uri.file(rule.sourcePath),
@@ -239,7 +239,7 @@ export async function uninstallRule(
   const rulesDir = getRulesDir(projectPath, platform);
   // Try common rule extensions
   for (const ext of ['.md', '.mdc', '.txt']) {
-    const target = path.join(rulesDir, `${ruleName}${ext}`);
+    const target = path.join(rulesDir, `${sanitizeName(ruleName)}${ext}`);
     try {
       await vscode.workspace.fs.delete(vscode.Uri.file(target), { useTrash: false });
     } catch {

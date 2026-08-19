@@ -1,6 +1,6 @@
 {
   "name": "lazy-skill-ai-agent-app",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "Standalone desktop application to manage AI skills for Claude Code and Antigravity",
   "main": "out/main.js",
   "author": "dn9uy3n",
@@ -14,7 +14,11 @@
     "build:linux": "npm run compile && electron-builder --linux",
     "build:all": "npm run compile && electron-builder -mwl"
   },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "electron": "^32.0.0",
     "electron-builder": "^25.0.0",
@@ -32,15 +36,18 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
     },
     "linux": {
       "target": ["tar.gz"],
-      "category": "Development"
+      "category": "Development",
+      "icon": "build/icon.png"
     }
   }
 }

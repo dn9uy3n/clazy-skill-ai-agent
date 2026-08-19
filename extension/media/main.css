@@ -106,6 +106,25 @@ h3 {
   gap: 12px;
 }
 
+/* Push the heading left so the filter and Refresh button group together. */
+.skills-header h3 {
+  margin-right: auto;
+}
+
+#btn-refresh {
+  flex: 0 0 auto;
+}
+
+.status-msg {
+  margin: 4px 0 6px;
+  font-size: 0.9em;
+  color: var(--vscode-descriptionForeground);
+}
+
+.status-msg.status-error {
+  color: var(--vscode-errorForeground);
+}
+
 #filter-input {
   flex: 0 0 200px;
   padding: 4px 8px;

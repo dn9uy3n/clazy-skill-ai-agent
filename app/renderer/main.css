@@ -147,6 +147,15 @@ h3 {
   gap: 12px;
 }
 
+/* Push the heading left so the filter and Refresh button group together. */
+.skills-header h3 {
+  margin-right: auto;
+}
+
+#btn-refresh {
+  flex: 0 0 auto;
+}
+
 #filter-input {
   flex: 0 0 220px;
   padding: 5px 8px;

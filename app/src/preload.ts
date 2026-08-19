@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { AppConfig, RuleInfo, SkillInfo, TargetPlatform } from './types';
+import { AppConfig, ScanResult, TargetPlatform } from './types';
 
 const api = {
   loadConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:load'),
@@ -12,12 +12,19 @@ const api = {
     ruleFiles: string[],
     projectPath: string | undefined,
     platform: TargetPlatform,
-  ): Promise<{ skills: SkillInfo[]; rules: RuleInfo[] }> =>
+  ): Promise<ScanResult> =>
     ipcRenderer.invoke('skills:scan', skillDirs, ruleFiles, projectPath, platform),
+  /** Markdown bodies are fetched per item so the scan payload stays small. */
+  getBody: (sourcePath: string): Promise<string> => ipcRenderer.invoke('skills:getBody', sourcePath),
+  /** Watch the configured skill directories and re-notify on change. */
+  watchDirs: (dirs: string[]): Promise<void> => ipcRenderer.invoke('watch:setDirs', dirs),
+  onSkillsChanged: (callback: () => void): void => {
+    ipcRenderer.on('skills:changed', () => callback());
+  },
   applyChanges: (
-    allSkills: SkillInfo[],
+    skillDirs: string[],
+    ruleFiles: string[],
     selectedSkillIds: string[],
-    allRules: RuleInfo[],
     selectedRuleIds: string[],
     projectPath: string,
     platform: TargetPlatform,
@@ -30,9 +37,9 @@ const api = {
   }> =>
     ipcRenderer.invoke(
       'skills:apply',
-      allSkills,
+      skillDirs,
+      ruleFiles,
       selectedSkillIds,
-      allRules,
       selectedRuleIds,
       projectPath,
       platform,

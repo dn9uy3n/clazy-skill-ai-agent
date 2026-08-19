@@ -16,6 +16,10 @@ let selectedItemId = null;
 let checkedSkillIds = new Set();
 /** @type {Set<string>} */
 let checkedRuleIds = new Set();
+/** @type {{dir: string, count: number}[]} */
+let dirStats = [];
+/** @type {string[]} */
+let scanErrors = [];
 
 const dirList = document.getElementById('dir-list');
 const ruleFileList = document.getElementById('rule-file-list');
@@ -24,8 +28,10 @@ const ruleList = document.getElementById('rule-list');
 const filterInput = /** @type {HTMLInputElement} */ (document.getElementById('filter-input'));
 const ruleFilterInput = /** @type {HTMLInputElement} */ (document.getElementById('rule-filter-input'));
 const descriptionBox = document.getElementById('skill-description');
+const statusMsg = document.getElementById('status-msg');
 const btnAddDir = document.getElementById('btn-add-dir');
 const btnAddRuleFile = document.getElementById('btn-add-rule-file');
+const btnRefresh = /** @type {HTMLButtonElement} */ (document.getElementById('btn-refresh'));
 const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
 const platformRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
@@ -34,6 +40,11 @@ const platformRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
 
 btnAddDir.addEventListener('click', () => vscode.postMessage({ command: 'addDirectory' }));
 btnAddRuleFile.addEventListener('click', () => vscode.postMessage({ command: 'addRuleFile' }));
+btnRefresh.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
+
+statusMsg.addEventListener('click', () => {
+  if (scanErrors.length) descriptionBox.textContent = scanErrors.join('\n');
+});
 
 btnCancel.addEventListener('click', () => {
   checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
@@ -62,12 +73,28 @@ platformRadios.forEach(r =>
 
 window.addEventListener('message', event => {
   const msg = event.data;
+
+  if (msg.command === 'scanning') {
+    btnRefresh.disabled = true;
+    setStatus('Scanning...', false);
+    return;
+  }
+
+  if (msg.command === 'body') {
+    // Ignore a body that arrives after the user moved to another item.
+    if (msg.id !== selectedItemId) return;
+    renderDescription(msg.body);
+    return;
+  }
+
   if (msg.command === 'update') {
     skills = msg.skills;
     rules = msg.rules;
     directories = msg.directories;
     ruleFiles = msg.ruleFiles;
     currentPlatform = msg.platform;
+    dirStats = msg.dirStats || [];
+    scanErrors = msg.errors || [];
 
     checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
     checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
@@ -78,8 +105,29 @@ window.addEventListener('message', event => {
     renderRuleFiles();
     renderSkills();
     renderRules();
+
+    btnRefresh.disabled = false;
+    setStatus(summarizeScan(), scanErrors.length > 0);
   }
 });
+
+function summarizeScan() {
+  const parts = [
+    `${skills.length} skill${skills.length === 1 ? '' : 's'}` +
+      (dirStats.length
+        ? ` from ${dirStats.length} director${dirStats.length === 1 ? 'y' : 'ies'}`
+        : ''),
+  ];
+  if (rules.length) parts.push(`${rules.length} rules`);
+  if (scanErrors.length) parts.push(`${scanErrors.length} problem(s) — click here`);
+  return parts.join(' · ');
+}
+
+function setStatus(text, isError) {
+  statusMsg.textContent = text;
+  statusMsg.classList.toggle('status-error', !!isError);
+  statusMsg.style.cursor = scanErrors.length ? 'pointer' : 'default';
+}
 
 function renderDirectories() {
   if (directories.length === 0) {
@@ -147,7 +195,7 @@ function renderSkills() {
         <div class="skill-item ${selected}" data-id="${escAttr(s.id)}" data-kind="skill">
           <input type="checkbox" ${checked} data-id="${escAttr(s.id)}" data-kind="skill" />
           <span class="skill-name">${esc(s.name)}</span>
-          <span class="skill-desc">${esc(truncate(s.description, 60))}</span>
+          <span class="skill-desc" title="${escAttr(s.description)}">${esc(truncate(s.description, 60))}</span>
           <span class="skill-source">${esc(basename(s.sourceDir))}</span>
         </div>`;
     })
@@ -209,15 +257,25 @@ function attachListItemHandlers(container) {
   });
 }
 
+/** Markdown bodies are fetched per item so the scan payload stays small. */
 function showDescription(id, kind) {
   const item = kind === 'rule' ? rules.find(r => r.id === id) : skills.find(s => s.id === id);
   if (!item) {
     descriptionBox.textContent = 'Item not found.';
     return;
   }
+  renderDescription('Loading...');
+  vscode.postMessage({ command: 'getBody', id, sourcePath: item.sourcePath });
+}
 
-  const lines = [
-    `Type: ${kind === 'rule' ? 'Rule' : 'Skill'}`,
+function renderDescription(bodyText) {
+  const item =
+    skills.find(s => s.id === selectedItemId) || rules.find(r => r.id === selectedItemId);
+  if (!item) return;
+  const isRule = rules.some(r => r.id === selectedItemId);
+
+  descriptionBox.textContent = [
+    `Type: ${isRule ? 'Rule' : 'Skill'}`,
     `Name: ${item.name}`,
     `Description: ${item.description}`,
     `Source: ${item.sourcePath}`,
@@ -225,9 +283,8 @@ function showDescription(id, kind) {
     '',
     '--- Content ---',
     '',
-    item.body || '(no content)',
-  ];
-  descriptionBox.textContent = lines.join('\n');
+    bodyText || '(no content)',
+  ].join('\n');
 }
 
 function basename(p) {
@@ -241,7 +298,14 @@ function esc(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function escAttr(s) {
-  return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  // `&` must go first, otherwise the entities emitted below get double-escaped.
+  // Ids now embed full directory paths, which can legitimately contain `&`.
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 vscode.postMessage({ command: 'ready' });

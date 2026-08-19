@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import {
+  DirStat,
   ExtensionMessage,
   RuleInfo,
   SkillInfo,
@@ -15,8 +17,12 @@ import {
   markRulesInstalled,
 } from './skillScanner';
 import { applyChanges } from './skillInstaller';
+import { readBody } from './frontmatter';
 
 const CONFIG_NS = 'lazy-skill-ai-agent';
+
+/** Sync clients and editors write in bursts; collapse them into one re-scan. */
+const WATCH_DEBOUNCE_MS = 800;
 
 export class LazySkillPanel {
   public static readonly viewType = 'lazySkillManager';
@@ -25,9 +31,14 @@ export class LazySkillPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
   private disposables: vscode.Disposable[] = [];
+  private watchers: vscode.Disposable[] = [];
+  private watchedDirs: string[] = [];
+  private watchTimer: NodeJS.Timeout | undefined;
   private currentPlatform: TargetPlatform = 'claude-code';
   private skills: SkillInfo[] = [];
   private rules: RuleInfo[] = [];
+  private scanning = false;
+  private rescanQueued = false;
 
   public static createOrShow(extensionUri: vscode.Uri): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
@@ -63,13 +74,71 @@ export class LazySkillPanel {
     );
 
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+
+    // Re-scan when the panel is brought back into view, so a skill added while
+    // the tab sat in the background is never missing from the list.
+    this.panel.onDidChangeViewState(
+      e => {
+        if (e.webviewPanel.visible) void this.refresh();
+      },
+      null,
+      this.disposables,
+    );
   }
 
   private dispose(): void {
     LazySkillPanel.instance = undefined;
+    this.clearWatchers();
     this.panel.dispose();
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
+  }
+
+  private clearWatchers(): void {
+    for (const w of this.watchers) w.dispose();
+    this.watchers = [];
+    this.watchedDirs = [];
+    if (this.watchTimer) {
+      clearTimeout(this.watchTimer);
+      this.watchTimer = undefined;
+    }
+  }
+
+  /**
+   * Watch each configured skill directory so adding or removing a skill on disk
+   * shows up without reopening the panel. Watching the directory itself (rather
+   * than a recursive glob) keeps a synced folder from firing on every file.
+   */
+  private setWatchedDirs(dirs: string[]): void {
+    const unchanged =
+      dirs.length === this.watchedDirs.length && dirs.every((d, i) => d === this.watchedDirs[i]);
+    if (unchanged) return;
+
+    this.clearWatchers();
+    this.watchedDirs = [...dirs];
+
+    for (const dir of dirs) {
+      try {
+        const watcher = vscode.workspace.createFileSystemWatcher(
+          new vscode.RelativePattern(vscode.Uri.file(dir), '*'),
+        );
+        const onChange = () => this.scheduleRescan();
+        watcher.onDidCreate(onChange, null, this.disposables);
+        watcher.onDidDelete(onChange, null, this.disposables);
+        watcher.onDidChange(onChange, null, this.disposables);
+        this.watchers.push(watcher);
+      } catch {
+        // unwatchable path — the scan reports the directory error instead
+      }
+    }
+  }
+
+  private scheduleRescan(): void {
+    if (this.watchTimer) clearTimeout(this.watchTimer);
+    this.watchTimer = setTimeout(() => {
+      this.watchTimer = undefined;
+      void this.refresh();
+    }, WATCH_DEBOUNCE_MS);
   }
 
   private getProjectPath(): string | undefined {
@@ -85,28 +154,70 @@ export class LazySkillPanel {
   }
 
   private async refresh(): Promise<void> {
-    const dirs = this.getDirectories();
-    const ruleFiles = this.getRuleFiles();
-    const projectPath = this.getProjectPath();
-
-    this.skills = await scanDirectories(dirs);
-    this.rules = await scanRuleFiles(ruleFiles);
-
-    if (projectPath) {
-      const installedSkills = await getInstalledSkillNames(projectPath, this.currentPlatform);
-      this.skills = markInstalled(this.skills, installedSkills);
-      const installedRules = await getInstalledRuleNames(projectPath, this.currentPlatform);
-      this.rules = markRulesInstalled(this.rules, installedRules);
+    if (this.scanning) {
+      this.rescanQueued = true;
+      return;
     }
+    this.scanning = true;
 
-    this.postMessage({
-      command: 'update',
-      skills: this.skills,
-      rules: this.rules,
-      directories: dirs,
-      ruleFiles,
-      platform: this.currentPlatform,
+    try {
+      const dirs = this.getDirectories();
+      const ruleFiles = this.getRuleFiles();
+      const projectPath = this.getProjectPath();
+
+      this.setWatchedDirs(dirs);
+      this.postMessage({ command: 'scanning' });
+
+      const skillScan = await scanDirectories(dirs);
+      const ruleScan = await scanRuleFiles(ruleFiles);
+
+      this.skills = skillScan.skills;
+      this.rules = ruleScan.rules;
+
+      if (projectPath) {
+        const installedSkills = await getInstalledSkillNames(projectPath, this.currentPlatform);
+        this.skills = markInstalled(this.skills, installedSkills);
+        const installedRules = await getInstalledRuleNames(projectPath, this.currentPlatform);
+        this.rules = markRulesInstalled(this.rules, installedRules);
+      }
+
+      this.postMessage({
+        command: 'update',
+        skills: this.skills,
+        rules: this.rules,
+        directories: dirs,
+        ruleFiles,
+        platform: this.currentPlatform,
+        dirStats: skillScan.dirStats as DirStat[],
+        errors: [...skillScan.errors, ...ruleScan.errors],
+      });
+    } finally {
+      this.scanning = false;
+      if (this.rescanQueued) {
+        this.rescanQueued = false;
+        void this.refresh();
+      }
+    }
+  }
+
+  /**
+   * Only documents under a configured skill directory (or a configured rule
+   * file) may be read, so a webview message can't turn into an arbitrary file
+   * read. Paths are resolved first so `..` segments can't step outside.
+   */
+  private isReadable(sourcePath: string): boolean {
+    const target = path.resolve(sourcePath);
+    const sameFs = (a: string, b: string) =>
+      process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+
+    const inDir = this.getDirectories().some(dir => {
+      const root = path.resolve(dir);
+      const rel = path.relative(root, target);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
     });
+    if (inDir) return true;
+
+    return this.getRuleFiles().some(file => sameFs(path.resolve(file), target));
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -114,8 +225,26 @@ export class LazySkillPanel {
 
     switch (msg.command) {
       case 'ready':
+      case 'refresh':
         await this.refresh();
         break;
+
+      case 'getBody': {
+        if (!this.isReadable(msg.sourcePath)) {
+          this.postMessage({
+            command: 'body',
+            id: msg.id,
+            body: '(access denied: path is outside the configured skill directories)',
+          });
+          break;
+        }
+        try {
+          this.postMessage({ command: 'body', id: msg.id, body: await readBody(msg.sourcePath) });
+        } catch (e) {
+          this.postMessage({ command: 'body', id: msg.id, body: `(could not read file: ${e})` });
+        }
+        break;
+      }
 
       case 'changePlatform':
         this.currentPlatform = msg.platform;
@@ -263,7 +392,9 @@ export class LazySkillPanel {
       <div class="skills-header">
         <h3>Available Skills</h3>
         <input type="text" id="filter-input" placeholder="Filter skills..." />
+        <button id="btn-refresh" class="btn btn-secondary" title="Re-scan skill directories">Refresh</button>
       </div>
+      <div id="status-msg" class="status-msg"></div>
       <div id="skill-list" class="skill-list"></div>
     </section>
 

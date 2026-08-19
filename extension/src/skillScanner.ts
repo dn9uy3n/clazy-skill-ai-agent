@@ -1,36 +1,48 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { RuleInfo, SkillInfo, TargetPlatform } from './types';
-import { getRulesDir, getSkillsDir } from './skillInstaller';
+import { DirStat, RuleInfo, SkillInfo, TargetPlatform } from './types';
+import { getRulesDir, getSkillsDir, sanitizeName } from './skillInstaller';
+import { firstLine, readDocHead, toDisplayString } from './frontmatter';
 
-interface Frontmatter {
-  name?: string;
-  description?: string;
-  [key: string]: unknown;
+const SCAN_CONCURRENCY = 32;
+const MAX_ERRORS = 50;
+
+/** Collects scan problems without letting a pathological directory blow up memory. */
+class ErrorLog {
+  private readonly messages: string[] = [];
+  private total = 0;
+
+  add(message: string): void {
+    this.total++;
+    if (this.messages.length < MAX_ERRORS) this.messages.push(message);
+  }
+
+  toArray(): string[] {
+    const hidden = this.total - this.messages.length;
+    return hidden > 0 ? [...this.messages, `... and ${hidden} more`] : [...this.messages];
+  }
 }
 
-function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: string } {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) {
-    return { frontmatter: {}, body: content };
-  }
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
-  const raw = match[1];
-  const body = match[2].trim();
-  const frontmatter: Frontmatter = {};
-
-  for (const line of raw.split(/\r?\n/)) {
-    const colonIdx = line.indexOf(':');
-    if (colonIdx === -1) continue;
-    const key = line.slice(0, colonIdx).trim();
-    let value: string | unknown = line.slice(colonIdx + 1).trim();
-    if (typeof value === 'string' && value.startsWith('"') && value.endsWith('"')) {
-      value = value.slice(1, -1);
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
     }
-    frontmatter[key] = value;
-  }
-
-  return { frontmatter, body };
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 /**
@@ -66,52 +78,70 @@ async function findSkillMdFile(skillDir: string, skillDirName: string): Promise<
   return path.join(skillDir, mdFiles[0]);
 }
 
-export async function scanDirectories(dirs: string[]): Promise<SkillInfo[]> {
+export interface SkillScanResult {
+  skills: SkillInfo[];
+  dirStats: DirStat[];
+  errors: string[];
+}
+
+/**
+ * Skill entries carry no markdown body — the panel fetches one only when the
+ * user selects an item, so a large skill set never crosses the webview bridge.
+ */
+export async function scanDirectories(dirs: string[]): Promise<SkillScanResult> {
   const skills: SkillInfo[] = [];
+  const dirStats: DirStat[] = [];
+  const errorLog = new ErrorLog();
 
   for (const dir of dirs) {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir));
-    } catch {
+    } catch (e) {
+      errorLog.add(`Cannot read directory ${dir}: ${errText(e)}`);
+      dirStats.push({ dir, count: 0 });
       continue;
     }
 
-    const dirBasename = path.basename(dir);
+    const subDirs = entries
+      .filter(([name, type]) => type === vscode.FileType.Directory && !name.startsWith('.'))
+      .map(([name]) => name);
 
-    for (const [entryName, entryType] of entries) {
-      if (entryType !== vscode.FileType.Directory) continue;
-
+    const scanned = await mapLimit(subDirs, SCAN_CONCURRENCY, async entryName => {
       const skillDir = path.join(dir, entryName);
+
       const mdPath = await findSkillMdFile(skillDir, entryName);
-      if (!mdPath) continue;
+      if (!mdPath) {
+        errorLog.add(`No markdown file found in ${skillDir}`);
+        return null;
+      }
 
       try {
-        const contentBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(mdPath));
-        const content = Buffer.from(contentBytes).toString('utf-8');
-        const { frontmatter, body } = parseFrontmatter(content);
+        const { frontmatter, body } = await readDocHead(mdPath);
 
-        const name = (frontmatter.name as string) || entryName;
-        const description = (frontmatter.description as string) || body.split('\n')[0] || '';
-        const isSkillFormat = path.basename(mdPath).toUpperCase() === 'SKILL.MD';
-
-        skills.push({
-          id: `${dirBasename}:${name}`,
-          name,
-          description,
+        return {
+          // Full source dir keeps ids unique when two configured directories
+          // share a basename (e.g. two different `.../skills` folders).
+          id: `${dir}::${entryName}`,
+          name: toDisplayString(frontmatter.name) || entryName,
+          description: toDisplayString(frontmatter.description) || firstLine(body),
           sourcePath: mdPath,
           sourceDir: dir,
-          format: isSkillFormat ? 'skill' : 'command',
+          format: path.basename(mdPath).toUpperCase() === 'SKILL.MD' ? 'skill' : 'command',
           isInstalled: false,
-          body,
-        });
-      } catch {
-        // Skip unreadable files
+        } as SkillInfo;
+      } catch (e) {
+        errorLog.add(`Cannot read ${mdPath}: ${errText(e)}`);
+        return null;
       }
-    }
+    });
+
+    const found = scanned.filter((s): s is SkillInfo => s !== null);
+    skills.push(...found);
+    dirStats.push({ dir, count: found.length });
   }
 
-  return skills;
+  return { skills, dirStats, errors: errorLog.toArray() };
 }
 
 export async function getInstalledSkillNames(
@@ -130,47 +160,54 @@ export async function getInstalledSkillNames(
 }
 
 export function markInstalled(skills: SkillInfo[], installedNames: string[]): SkillInfo[] {
+  // Installed folders are named with the sanitized skill name, so compare like for like.
   const installedSet = new Set(installedNames);
   return skills.map(skill => ({
     ...skill,
-    isInstalled: installedSet.has(skill.name),
+    isInstalled: installedSet.has(sanitizeName(skill.name)),
   }));
 }
 
 // --- Rules ---
 
-export async function scanRuleFiles(files: string[]): Promise<RuleInfo[]> {
-  const rules: RuleInfo[] = [];
+export interface RuleScanResult {
+  rules: RuleInfo[];
+  errors: string[];
+}
 
-  for (const filePath of files) {
+export async function scanRuleFiles(files: string[]): Promise<RuleScanResult> {
+  const errorLog = new ErrorLog();
+
+  const scanned = await mapLimit(files, SCAN_CONCURRENCY, async filePath => {
     try {
       const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-      if (stat.type !== vscode.FileType.File) continue;
+      if (stat.type !== vscode.FileType.File) {
+        errorLog.add(`Not a file: ${filePath}`);
+        return null;
+      }
 
-      const contentBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-      const content = Buffer.from(contentBytes).toString('utf-8');
-      const { frontmatter, body } = parseFrontmatter(content);
+      const { frontmatter, body } = await readDocHead(filePath);
 
       const ext = path.extname(filePath);
       const baseName = path.basename(filePath, ext);
-      const name = (frontmatter.name as string) || baseName;
-      const description =
-        (frontmatter.description as string) || body.split('\n').find(l => l.trim()) || '';
 
-      rules.push({
+      return {
         id: `rule:${filePath}`,
-        name,
-        description,
+        name: toDisplayString(frontmatter.name) || baseName,
+        description: toDisplayString(frontmatter.description) || firstLine(body),
         sourcePath: filePath,
         isInstalled: false,
-        body,
-      });
-    } catch {
-      // skip unreadable
+      } as RuleInfo;
+    } catch (e) {
+      errorLog.add(`Cannot read ${filePath}: ${errText(e)}`);
+      return null;
     }
-  }
+  });
 
-  return rules;
+  return {
+    rules: scanned.filter((r): r is RuleInfo => r !== null),
+    errors: errorLog.toArray(),
+  };
 }
 
 export async function getInstalledRuleNames(
@@ -190,5 +227,5 @@ export async function getInstalledRuleNames(
 
 export function markRulesInstalled(rules: RuleInfo[], installedNames: string[]): RuleInfo[] {
   const set = new Set(installedNames);
-  return rules.map(r => ({ ...r, isInstalled: set.has(r.name) }));
+  return rules.map(r => ({ ...r, isInstalled: set.has(sanitizeName(r.name)) }));
 }

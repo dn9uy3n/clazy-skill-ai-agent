@@ -1,6 +1,20 @@
 import * as fs from 'fs/promises';
+import type { Dirent } from 'fs';
 import * as path from 'path';
 import { RuleInfo, SkillInfo, TargetPlatform } from './types';
+import { readDocHead, toDisplayString } from './frontmatter';
+
+/**
+ * A skill's display name comes from third-party frontmatter, so strip anything
+ * that could escape the target directory or be rejected by the filesystem.
+ */
+export function sanitizeName(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\.+$/, '')
+    .trim();
+  return cleaned || 'unnamed-skill';
+}
 
 export function getSkillsDir(projectPath: string, platform: TargetPlatform): string {
   switch (platform) {
@@ -39,22 +53,14 @@ export async function generateSkillsIndex(
   const skillsDir = getSkillsDir(projectPath, platform);
   const indexPath = path.join(skillsDir, 'SKILL.md');
 
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = await fs.readdir(skillsDir);
+    entries = await fs.readdir(skillsDir, { withFileTypes: true });
   } catch {
     return;
   }
 
-  const folders: string[] = [];
-  for (const name of entries) {
-    try {
-      const stat = await fs.stat(path.join(skillsDir, name));
-      if (stat.isDirectory()) folders.push(name);
-    } catch {
-      // skip
-    }
-  }
+  const folders = entries.filter(e => e.isDirectory()).map(e => e.name);
 
   if (folders.length === 0) {
     await fs.rm(indexPath, { force: true });
@@ -65,23 +71,16 @@ export async function generateSkillsIndex(
 
   for (const folderName of folders) {
     const folderPath = path.join(skillsDir, folderName);
-    let subEntries: string[];
+    let subEntries: Dirent[];
     try {
-      subEntries = await fs.readdir(folderPath);
+      subEntries = await fs.readdir(folderPath, { withFileTypes: true });
     } catch {
       continue;
     }
 
-    const mdFiles: string[] = [];
-    for (const n of subEntries) {
-      if (!n.toLowerCase().endsWith('.md')) continue;
-      try {
-        const st = await fs.stat(path.join(folderPath, n));
-        if (st.isFile()) mdFiles.push(n);
-      } catch {
-        // skip
-      }
-    }
+    const mdFiles = subEntries
+      .filter(e => e.isFile() && e.name.toLowerCase().endsWith('.md'))
+      .map(e => e.name);
     if (mdFiles.length === 0) continue;
 
     const primary =
@@ -93,19 +92,9 @@ export async function generateSkillsIndex(
     let name = folderName;
     let description = '';
     try {
-      const content = await fs.readFile(path.join(folderPath, primary), 'utf-8');
-      const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      if (match) {
-        for (const line of match[1].split(/\r?\n/)) {
-          const idx = line.indexOf(':');
-          if (idx === -1) continue;
-          const key = line.slice(0, idx).trim();
-          let value = line.slice(idx + 1).trim();
-          if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-          if (key === 'name') name = value;
-          else if (key === 'description') description = value;
-        }
-      }
+      const { frontmatter } = await readDocHead(path.join(folderPath, primary));
+      name = toDisplayString(frontmatter.name) || folderName;
+      description = toDisplayString(frontmatter.description);
     } catch {
       // skip unreadable
     }
@@ -162,7 +151,7 @@ export async function installSkill(
   await fs.mkdir(skillsDir, { recursive: true });
 
   const sourceDir = path.dirname(skill.sourcePath);
-  const targetDir = path.join(skillsDir, skill.name);
+  const targetDir = path.join(skillsDir, sanitizeName(skill.name));
 
   await fs.rm(targetDir, { recursive: true, force: true });
   await fs.cp(sourceDir, targetDir, { recursive: true });
@@ -173,7 +162,7 @@ export async function uninstallSkill(
   projectPath: string,
   platform: TargetPlatform,
 ): Promise<void> {
-  const targetDir = path.join(getSkillsDir(projectPath, platform), skillName);
+  const targetDir = path.join(getSkillsDir(projectPath, platform), sanitizeName(skillName));
   await fs.rm(targetDir, { recursive: true, force: true });
 }
 
@@ -188,7 +177,7 @@ export async function installRule(
   await fs.mkdir(rulesDir, { recursive: true });
 
   const ext = path.extname(rule.sourcePath) || '.md';
-  const targetFile = path.join(rulesDir, `${rule.name}${ext}`);
+  const targetFile = path.join(rulesDir, `${sanitizeName(rule.name)}${ext}`);
   await fs.copyFile(rule.sourcePath, targetFile);
 }
 
@@ -199,7 +188,7 @@ export async function uninstallRule(
 ): Promise<void> {
   const rulesDir = getRulesDir(projectPath, platform);
   for (const ext of ['.md', '.mdc', '.txt']) {
-    const target = path.join(rulesDir, `${ruleName}${ext}`);
+    const target = path.join(rulesDir, `${sanitizeName(ruleName)}${ext}`);
     await fs.rm(target, { force: true });
   }
 }

@@ -7,6 +7,12 @@ let rules = [];
 let selectedItemId = null;
 let checkedSkillIds = new Set();
 let checkedRuleIds = new Set();
+let scanErrors = [];
+// The watcher can fire repeatedly while a sync client writes; one scan at a time.
+let scanning = false;
+let rescanQueued = false;
+// Guards against a slow body fetch landing after the user picked another item.
+let bodyRequestToken = 0;
 
 const projectPathEl = document.getElementById('project-path');
 const dirList = document.getElementById('dir-list');
@@ -20,6 +26,7 @@ const statusMsg = document.getElementById('status-msg');
 const btnSelectProject = document.getElementById('btn-select-project');
 const btnAddDir = document.getElementById('btn-add-dir');
 const btnAddRuleFile = document.getElementById('btn-add-rule-file');
+const btnRefresh = document.getElementById('btn-refresh');
 const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
 
@@ -58,6 +65,8 @@ btnAddRuleFile.addEventListener('click', async () => {
   }
 });
 
+btnRefresh.addEventListener('click', () => refresh());
+
 btnCancel.addEventListener('click', () => {
   checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
   checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
@@ -72,22 +81,27 @@ btnApply.addEventListener('click', async () => {
     return;
   }
   setStatus('Applying...');
-  const result = await api.applyChanges(
-    skills,
-    Array.from(checkedSkillIds),
-    rules,
-    Array.from(checkedRuleIds),
-    config.lastProjectPath,
-    config.platform,
-  );
-  if (result.errors.length > 0) {
-    setStatus(`Done with errors: ${result.errors.join('; ')}`, true);
-  } else {
-    setStatus(
-      `Skills: +${result.skillsInstalled}/-${result.skillsRemoved} · Rules: +${result.rulesInstalled}/-${result.rulesRemoved}`,
+  try {
+    const result = await api.applyChanges(
+      config.skillDirectories,
+      config.ruleFiles,
+      Array.from(checkedSkillIds),
+      Array.from(checkedRuleIds),
+      config.lastProjectPath,
+      config.platform,
     );
+    await refresh();
+    if (result.errors.length > 0) {
+      setStatus(`Done with ${result.errors.length} error(s) — see details below.`, true);
+      descriptionBox.textContent = result.errors.join('\n');
+    } else {
+      setStatus(
+        `Skills: +${result.skillsInstalled}/-${result.skillsRemoved} · Rules: +${result.rulesInstalled}/-${result.rulesRemoved}`,
+      );
+    }
+  } catch (e) {
+    setStatus(`Apply failed: ${e && e.message ? e.message : e}`, true);
   }
-  await refresh();
 });
 
 filterInput.addEventListener('input', renderSkills);
@@ -106,27 +120,66 @@ async function init() {
   document
     .querySelectorAll('input[name="platform"]')
     .forEach(r => (r.checked = r.value === config.platform));
+  api.onSkillsChanged(() => refresh());
   await refresh();
 }
 
 async function refresh() {
-  projectPathEl.textContent = config.lastProjectPath || 'No project selected';
-  renderDirectories();
-  renderRuleFiles();
+  if (scanning) {
+    rescanQueued = true;
+    return;
+  }
+  scanning = true;
+  btnRefresh.disabled = true;
 
-  const result = await api.scanSkills(
-    config.skillDirectories,
-    config.ruleFiles,
-    config.lastProjectPath,
-    config.platform,
-  );
-  skills = result.skills;
-  rules = result.rules;
-  checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
-  checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
-  renderSkills();
-  renderRules();
+  try {
+    projectPathEl.textContent = config.lastProjectPath || 'No project selected';
+    renderDirectories();
+    renderRuleFiles();
+    await api.watchDirs(config.skillDirectories);
+
+    setStatus('Scanning...');
+    const result = await api.scanSkills(
+      config.skillDirectories,
+      config.ruleFiles,
+      config.lastProjectPath,
+      config.platform,
+    );
+
+    skills = result.skills;
+    rules = result.rules;
+    scanErrors = result.errors || [];
+    checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
+    checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
+    renderSkills();
+    renderRules();
+    setStatus(summarizeScan(result), scanErrors.length > 0);
+  } catch (e) {
+    setStatus(`Scan failed: ${e && e.message ? e.message : e}`, true);
+  } finally {
+    scanning = false;
+    btnRefresh.disabled = false;
+    if (rescanQueued) {
+      rescanQueued = false;
+      refresh();
+    }
+  }
 }
+
+function summarizeScan(result) {
+  const dirCount = (result.dirStats || []).length;
+  const parts = [
+    `${result.skills.length} skill${result.skills.length === 1 ? '' : 's'}` +
+      (dirCount ? ` from ${dirCount} director${dirCount === 1 ? 'y' : 'ies'}` : ''),
+  ];
+  if (result.rules.length) parts.push(`${result.rules.length} rules`);
+  if (scanErrors.length) parts.push(`${scanErrors.length} problem(s) — click here`);
+  return parts.join(' · ');
+}
+
+statusMsg.addEventListener('click', () => {
+  if (scanErrors.length) descriptionBox.textContent = scanErrors.join('\n');
+});
 
 function renderDirectories() {
   dirList.innerHTML = '';
@@ -224,6 +277,7 @@ function renderItemList(container, items, filterText, checkedSet, kind, emptyHin
     const desc = document.createElement('span');
     desc.className = 'skill-desc';
     desc.textContent = truncate(item.description, 60);
+    desc.title = item.description;
 
     const source = document.createElement('span');
     source.className = 'skill-source';
@@ -245,8 +299,8 @@ function renderItemList(container, items, filterText, checkedSet, kind, emptyHin
   }
 }
 
-function showDescription(item, kind) {
-  descriptionBox.textContent = [
+function describe(item, kind, bodyText) {
+  return [
     `Type: ${kind === 'rule' ? 'Rule' : 'Skill'}`,
     `Name: ${item.name}`,
     `Description: ${item.description}`,
@@ -255,13 +309,27 @@ function showDescription(item, kind) {
     '',
     '--- Content ---',
     '',
-    item.body || '(no content)',
+    bodyText,
   ].join('\n');
+}
+
+async function showDescription(item, kind) {
+  const token = ++bodyRequestToken;
+  descriptionBox.textContent = describe(item, kind, 'Loading...');
+  try {
+    const body = await api.getBody(item.sourcePath);
+    if (token !== bodyRequestToken) return;
+    descriptionBox.textContent = describe(item, kind, body || '(no content)');
+  } catch (e) {
+    if (token !== bodyRequestToken) return;
+    descriptionBox.textContent = describe(item, kind, `(could not read file: ${e})`);
+  }
 }
 
 function setStatus(msg, isError) {
   statusMsg.textContent = msg;
   statusMsg.style.color = isError ? 'var(--error)' : 'var(--text-muted)';
+  statusMsg.style.cursor = scanErrors.length ? 'pointer' : 'default';
 }
 
 function truncate(s, max) {
