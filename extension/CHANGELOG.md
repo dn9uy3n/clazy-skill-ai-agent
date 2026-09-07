@@ -2,6 +2,12 @@
 
 All notable changes to the "Lazy Skill AI Agent" extension are documented here.
 
+## [0.8.1]
+
+### Fixed
+
+- The Rules section (both "Rule Files" and "Available Rules") was hidden entirely from the panel whenever ZCode was the selected platform. It was gated on a `supportsRuleFiles` flag meant to distinguish "installs rules as standalone files" from "merges rules into AGENTS.md" — but the UI for picking which configured rules apply is identical either way, only the backend install target differs. The flag and the hide/show logic are removed; the Rules section is now always visible, for every platform.
+
 ## [0.8.0]
 
 ### Added

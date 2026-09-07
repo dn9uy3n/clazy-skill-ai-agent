@@ -2,7 +2,7 @@
   "name": "lazy-skill-ai-agent",
   "displayName": "Lazy Skill AI Agent",
   "description": "Manage AI skills and rules for Claude Code, Antigravity, Cursor, and ZCode (z.ai) projects",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "dn9uy3n",
   "repository": {
     "type": "git",

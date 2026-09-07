@@ -38,8 +38,6 @@ const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
 const platformList = document.getElementById('platform-list');
 const platformNote = document.getElementById('platform-note');
-const ruleFilesSection = document.getElementById('rule-files-section');
-const rulesSection = document.getElementById('rules-section');
 
 btnAddDir.addEventListener('click', () => vscode.postMessage({ command: 'addDirectory' }));
 btnAddRuleFile.addEventListener('click', () => vscode.postMessage({ command: 'addRuleFile' }));
@@ -134,10 +132,6 @@ function renderPlatforms() {
   const current = platforms.find(p => p.id === currentPlatform);
   platformNote.textContent = current && current.note ? current.note : '';
   platformNote.hidden = !current || !current.note;
-
-  const supportsRules = !current || current.supportsRuleFiles;
-  ruleFilesSection.hidden = !supportsRules;
-  rulesSection.hidden = !supportsRules;
 }
 
 function summarizeScan() {

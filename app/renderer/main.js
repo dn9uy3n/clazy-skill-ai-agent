@@ -32,8 +32,6 @@ const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
 const platformList = document.getElementById('platform-list');
 const platformNote = document.getElementById('platform-note');
-const ruleFilesSection = document.getElementById('rule-files-section');
-const rulesSection = document.getElementById('rules-section');
 
 btnSelectProject.addEventListener('click', async () => {
   const dir = await api.selectDirectory('Select Project Folder');
@@ -144,10 +142,6 @@ function renderPlatforms() {
   const current = platforms.find(p => p.id === config.platform);
   platformNote.textContent = current && current.note ? current.note : '';
   platformNote.hidden = !current || !current.note;
-
-  const supportsRules = !current || current.supportsRuleFiles;
-  ruleFilesSection.hidden = !supportsRules;
-  rulesSection.hidden = !supportsRules;
 }
 
 async function init() {

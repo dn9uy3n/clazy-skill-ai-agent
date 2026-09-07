@@ -96,12 +96,17 @@ test('only zcode declares a description length cap', () => {
   assert.equal(getPlatform('cursor').maxDescriptionChars, undefined);
 });
 
-test('platformUiList exposes supportsRuleFiles=false only for zcode', () => {
+test('platformUiList returns every platform with an id, label, and (for zcode) an explanatory note', () => {
+  // The Rules UI is identical for every platform (same "pick which configured
+  // rules apply" checkbox list) — only the backend install target differs, so
+  // the panel must never hide it for a platform. The AGENTS.md-merge behavior
+  // is instead surfaced to the user only through zcode's note text.
   const list = platformUiList();
-  const zcode = list.find(p => p.id === 'zcode');
-  assert.ok(zcode);
-  assert.equal(zcode?.supportsRuleFiles, false);
-  for (const p of list.filter(p => p.id !== 'zcode')) {
-    assert.equal(p.supportsRuleFiles, true);
+  assert.equal(list.length, PLATFORMS.length);
+  for (const p of list) {
+    assert.ok(p.id);
+    assert.ok(p.label);
   }
+  const zcode = list.find(p => p.id === 'zcode');
+  assert.match(zcode?.note ?? '', /AGENTS\.md/);
 });

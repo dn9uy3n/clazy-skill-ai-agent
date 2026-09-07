@@ -104,7 +104,6 @@ export function platformUiList(): PlatformMeta[] {
   return PLATFORMS.map(p => ({
     id: p.id,
     label: p.label,
-    supportsRuleFiles: p.rules.kind === 'files',
     note: p.note,
   }));
 }

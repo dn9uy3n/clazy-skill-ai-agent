@@ -1,6 +1,6 @@
 {
   "name": "lazy-skill-ai-agent-app",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Standalone desktop application to manage AI skills and rules for Claude Code, Antigravity, Cursor, and ZCode (z.ai)",
   "main": "out/main.js",
   "author": "dn9uy3n",

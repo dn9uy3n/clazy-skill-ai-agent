@@ -24,6 +24,7 @@ Thumbs.db
 *.swo
 .idea/
 
-# Local Claude workspace
+# Local AI tool workspaces
 .claude/
+.zcode/
 PLAN.md

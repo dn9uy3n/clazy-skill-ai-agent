@@ -39,7 +39,6 @@ export interface DirStat {
 export interface PlatformMeta {
   id: TargetPlatform;
   label: string;
-  supportsRuleFiles: boolean;
   note?: string;
 }
 
