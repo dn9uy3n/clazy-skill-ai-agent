@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { DirStat, RuleInfo, SkillInfo, TargetPlatform } from './types';
-import { getRulesDir, getSkillsDir, sanitizeName } from './skillInstaller';
-import { firstLine, readDocHead, toDisplayString } from './frontmatter';
+import { getAgentsMdRuleNames, getRulesDir, getSkillsDir, sanitizeName } from './skillInstaller';
+import { firstLine, toDisplayString } from './frontmatter';
+import { readDocHead } from './docReader';
+import { isDir, isFile } from './fsBits';
+import { getPlatform } from './platforms';
 
 const SCAN_CONCURRENCY = 32;
 const MAX_ERRORS = 50;
@@ -58,7 +61,7 @@ async function findSkillMdFile(skillDir: string, skillDirName: string): Promise<
   }
 
   const mdFiles = entries
-    .filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.md'))
+    .filter(([name, type]) => isFile(type) && name.toLowerCase().endsWith('.md'))
     .map(([name]) => name);
 
   if (mdFiles.length === 0) return null;
@@ -104,7 +107,7 @@ export async function scanDirectories(dirs: string[]): Promise<SkillScanResult> 
     }
 
     const subDirs = entries
-      .filter(([name, type]) => type === vscode.FileType.Directory && !name.startsWith('.'))
+      .filter(([name, type]) => isDir(type) && !name.startsWith('.'))
       .map(([name]) => name);
 
     const scanned = await mapLimit(subDirs, SCAN_CONCURRENCY, async entryName => {
@@ -152,7 +155,7 @@ export async function getInstalledSkillNames(
   try {
     const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(skillsDir));
     return entries
-      .filter(([, type]) => type === vscode.FileType.Directory)
+      .filter(([, type]) => isDir(type))
       .map(([name]) => name);
   } catch {
     return [];
@@ -181,7 +184,7 @@ export async function scanRuleFiles(files: string[]): Promise<RuleScanResult> {
   const scanned = await mapLimit(files, SCAN_CONCURRENCY, async filePath => {
     try {
       const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-      if (stat.type !== vscode.FileType.File) {
+      if (!isFile(stat.type)) {
         errorLog.add(`Not a file: ${filePath}`);
         return null;
       }
@@ -214,11 +217,16 @@ export async function getInstalledRuleNames(
   projectPath: string,
   platform: TargetPlatform,
 ): Promise<string[]> {
+  if (getPlatform(platform).rules.kind === 'agents-md') {
+    return getAgentsMdRuleNames(projectPath, platform);
+  }
+
   const rulesDir = getRulesDir(projectPath, platform);
+  if (rulesDir === null) return [];
   try {
     const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(rulesDir));
     return entries
-      .filter(([name, type]) => type === vscode.FileType.File && /\.(md|mdc|txt)$/i.test(name))
+      .filter(([name, type]) => isFile(type) && /\.(md|mdc|txt)$/i.test(name))
       .map(([name]) => path.basename(name, path.extname(name)));
   } catch {
     return [];

@@ -1,5 +1,3 @@
-import * as vscode from 'vscode';
-
 /**
  * Minimal YAML-frontmatter reader.
  *
@@ -12,9 +10,6 @@ import * as vscode from 'vscode';
  * value: `description: >-` came back as the literal string `">-"`, and quoted
  * values were truncated at the first newline with the opening quote left on.
  */
-
-/** Frontmatter sits at the top of the file, so only the head needs decoding. */
-const HEAD_BYTES = 8192;
 
 export const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
@@ -316,25 +311,4 @@ export function toDisplayString(value: unknown): string {
 export function firstLine(body: string): string {
   const line = body.split('\n').find(l => l.trim());
   return line ? line.trim() : '';
-}
-
-/**
- * Read a document's frontmatter, decoding only its head. Scanning ~800 skills
- * otherwise decodes ~10 MB of markdown that the list view never shows.
- */
-export async function readDocHead(filePath: string): Promise<ParsedDoc> {
-  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-
-  if (buffer.length <= HEAD_BYTES) return parseFrontmatter(buffer.toString('utf-8'));
-
-  const head = buffer.subarray(0, HEAD_BYTES).toString('utf-8');
-  if (FRONTMATTER_RE.test(head)) return parseFrontmatter(head);
-  return parseFrontmatter(buffer.toString('utf-8'));
-}
-
-/** Read a document's full markdown body, on demand. */
-export async function readBody(filePath: string): Promise<string> {
-  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-  return parseFrontmatter(Buffer.from(bytes).toString('utf-8')).body;
 }

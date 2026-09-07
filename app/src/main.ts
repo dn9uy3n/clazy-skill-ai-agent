@@ -13,6 +13,7 @@ import {
 import { readBody } from './frontmatter';
 import { applyChanges } from './skillInstaller';
 import { ScanResult, TargetPlatform } from './types';
+import { platformUiList } from './platforms';
 
 /** Dropbox and editors write in bursts; collapse them into one re-scan. */
 const WATCH_DEBOUNCE_MS = 800;
@@ -98,6 +99,7 @@ app.on('activate', () => {
 
 ipcMain.handle('config:load', async () => loadConfig());
 ipcMain.handle('config:save', async (_e, config) => saveConfig(config));
+ipcMain.handle('platforms:list', async () => platformUiList());
 
 ipcMain.handle('watch:setDirs', async (_e, dirs: string[]) => setWatchedDirs(dirs ?? []));
 
@@ -178,28 +180,42 @@ async function realPathOrNull(p: string): Promise<string | null> {
  * The renderer may only read documents that live under a configured skill
  * directory or that are a configured rule file — never an arbitrary path.
  * Paths are resolved first so `..` segments and symlinks can't step outside.
+ *
+ * A configured directory's *entries* can themselves be symlinks/junctions —
+ * e.g. a `.zcode/skills/foo` folder pointed at a shared `~/.agents/skills/foo`
+ * is a normal setup — so the root itself must not be the thing realpath'd
+ * and compared against: that would resolve straight through to
+ * `~/.agents/skills` and reject every skill under the directory. Instead
+ * each top-level entry under a configured root is resolved individually,
+ * and the requested path must land inside *that* entry's real location. A
+ * symlink nested *inside* a skill folder still resolves outside its entry's
+ * real location and is still rejected.
  */
 async function assertReadable(sourcePath: string): Promise<string> {
   const config = await loadConfig();
-  const real = await realPathOrNull(sourcePath);
-  if (!real) throw new Error(`Cannot read ${sourcePath}`);
+  const target = await realPathOrNull(sourcePath);
+  if (!target) throw new Error(`Cannot read ${sourcePath}`);
+  const normTarget = normalizePath(target);
 
-  const target = normalizePath(real);
+  for (const dir of config.skillDirectories) {
+    const normDir = normalizePath(path.resolve(dir));
+    const normSource = normalizePath(path.resolve(sourcePath));
+    if (normSource !== normDir && !normSource.startsWith(normDir + path.sep)) continue;
 
-  const dirs = await Promise.all(config.skillDirectories.map(realPathOrNull));
-  const inDir = dirs.some(dir => {
-    if (!dir) return false;
-    const root = normalizePath(dir);
-    return target === root || target.startsWith(root + path.sep);
-  });
+    const entryName = path.relative(dir, sourcePath).split(path.sep)[0];
+    if (!entryName || entryName === '..') continue;
+
+    const entryReal = await realPathOrNull(path.join(dir, entryName));
+    if (!entryReal) continue;
+    const normEntry = normalizePath(entryReal);
+    if (normTarget === normEntry || normTarget.startsWith(normEntry + path.sep)) return target;
+  }
 
   const files = await Promise.all(config.ruleFiles.map(realPathOrNull));
-  const isRuleFile = files.some(file => file && normalizePath(file) === target);
+  const isRuleFile = files.some(file => file && normalizePath(file) === normTarget);
+  if (isRuleFile) return target;
 
-  if (!inDir && !isRuleFile) {
-    throw new Error('Access denied: path is outside the configured skill directories');
-  }
-  return real;
+  throw new Error('Access denied: path is outside the configured skill directories');
 }
 
 ipcMain.handle('skills:getBody', async (_e, sourcePath: string): Promise<string> =>

@@ -11,6 +11,8 @@ let directories = [];
 /** @type {string[]} */
 let ruleFiles = [];
 let currentPlatform = 'claude-code';
+/** @type {import('../src/types').PlatformMeta[]} */
+let platforms = [];
 let selectedItemId = null;
 /** @type {Set<string>} */
 let checkedSkillIds = new Set();
@@ -34,9 +36,10 @@ const btnAddRuleFile = document.getElementById('btn-add-rule-file');
 const btnRefresh = /** @type {HTMLButtonElement} */ (document.getElementById('btn-refresh'));
 const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
-const platformRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
-  document.querySelectorAll('input[name="platform"]')
-);
+const platformList = document.getElementById('platform-list');
+const platformNote = document.getElementById('platform-note');
+const ruleFilesSection = document.getElementById('rule-files-section');
+const rulesSection = document.getElementById('rules-section');
 
 btnAddDir.addEventListener('click', () => vscode.postMessage({ command: 'addDirectory' }));
 btnAddRuleFile.addEventListener('click', () => vscode.postMessage({ command: 'addRuleFile' }));
@@ -64,13 +67,6 @@ btnApply.addEventListener('click', () => {
 filterInput.addEventListener('input', renderSkills);
 ruleFilterInput.addEventListener('input', renderRules);
 
-platformRadios.forEach(r =>
-  r.addEventListener('change', () => {
-    currentPlatform = r.value;
-    vscode.postMessage({ command: 'changePlatform', platform: currentPlatform });
-  }),
-);
-
 window.addEventListener('message', event => {
   const msg = event.data;
 
@@ -93,14 +89,14 @@ window.addEventListener('message', event => {
     directories = msg.directories;
     ruleFiles = msg.ruleFiles;
     currentPlatform = msg.platform;
+    platforms = msg.platforms || [];
     dirStats = msg.dirStats || [];
     scanErrors = msg.errors || [];
 
     checkedSkillIds = new Set(skills.filter(s => s.isInstalled).map(s => s.id));
     checkedRuleIds = new Set(rules.filter(r => r.isInstalled).map(r => r.id));
 
-    platformRadios.forEach(r => (r.checked = r.value === currentPlatform));
-
+    renderPlatforms();
     renderDirectories();
     renderRuleFiles();
     renderSkills();
@@ -110,6 +106,39 @@ window.addEventListener('message', event => {
     setStatus(summarizeScan(), scanErrors.length > 0);
   }
 });
+
+/**
+ * The radios are built from `platforms` (sent by the host on every scan)
+ * instead of being hardcoded in the HTML, so adding a target tool is a
+ * registry entry in platforms.ts, not an edit here or in webviewPanel.ts.
+ */
+function renderPlatforms() {
+  platformList.innerHTML = platforms
+    .map(p => {
+      const checked = p.id === currentPlatform ? 'checked' : '';
+      return `
+        <label class="radio-label">
+          <input type="radio" name="platform" value="${escAttr(p.id)}" ${checked}>
+          ${esc(p.label)}
+        </label>`;
+    })
+    .join('');
+
+  platformList.querySelectorAll('input[type="radio"]').forEach(r => {
+    r.addEventListener('change', () => {
+      currentPlatform = /** @type {HTMLInputElement} */ (r).value;
+      vscode.postMessage({ command: 'changePlatform', platform: currentPlatform });
+    });
+  });
+
+  const current = platforms.find(p => p.id === currentPlatform);
+  platformNote.textContent = current && current.note ? current.note : '';
+  platformNote.hidden = !current || !current.note;
+
+  const supportsRules = !current || current.supportsRuleFiles;
+  ruleFilesSection.hidden = !supportsRules;
+  rulesSection.hidden = !supportsRules;
+}
 
 function summarizeScan() {
   const parts = [

@@ -1,8 +1,8 @@
 {
   "name": "lazy-skill-ai-agent",
   "displayName": "Lazy Skill AI Agent",
-  "description": "Manage AI skills for Claude Code and Antigravity projects",
-  "version": "0.7.1",
+  "description": "Manage AI skills and rules for Claude Code, Antigravity, Cursor, and ZCode (z.ai) projects",
+  "version": "0.8.0",
   "publisher": "dn9uy3n",
   "repository": {
     "type": "git",
@@ -42,6 +42,18 @@
             "type": "string"
           },
           "description": "Paths to individual rule files (.md/.mdc/.txt) that can be added to a project"
+        },
+        "lazy-skill-ai-agent.targetPlatform": {
+          "type": "string",
+          "enum": ["claude-code", "antigravity", "cursor", "zcode"],
+          "enumDescriptions": [
+            "{project}/.claude/skills + .claude/rules",
+            "{project}/.agent/skills + .agents/rules",
+            "{project}/.cursor/skills + .cursor/rules",
+            "{project}/.zcode/skills (no rules folder; rules merge into AGENTS.md)"
+          ],
+          "default": "claude-code",
+          "description": "Which AI tool's workspace folders skills and rules are installed into"
         }
       }
     }
@@ -49,6 +61,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "tsc -p ./ && node --test out/test/*.test.js",
     "package": "vsce package"
   },
   "devDependencies": {

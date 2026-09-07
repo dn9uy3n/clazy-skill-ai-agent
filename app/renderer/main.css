@@ -98,11 +98,27 @@ h3 {
   margin-right: 8px;
 }
 
+/* Radio labels are built into this div by main.js; `display: contents` lets
+   them lay out as if they were direct children of the flex row above, same
+   as before the radios moved from static HTML to a data-driven render. */
+#platform-list {
+  display: contents;
+}
+
 .radio-label {
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
+}
+
+.platform-note {
+  flex-basis: 100%;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+.platform-note[hidden] {
+  display: none;
 }
 
 /* Directories */

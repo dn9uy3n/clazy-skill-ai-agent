@@ -20,18 +20,8 @@
 
     <section class="platform-section">
       <h3>Target Platform</h3>
-      <label class="radio-label">
-        <input type="radio" name="platform" value="claude-code" checked>
-        Claude Code
-      </label>
-      <label class="radio-label">
-        <input type="radio" name="platform" value="antigravity">
-        Antigravity
-      </label>
-      <label class="radio-label">
-        <input type="radio" name="platform" value="cursor">
-        Cursor
-      </label>
+      <div id="platform-list"></div>
+      <div id="platform-note" class="platform-note"></div>
     </section>
 
     <section class="directories-section">
@@ -49,13 +39,13 @@
       <div id="skill-list" class="skill-list"></div>
     </section>
 
-    <section class="directories-section">
+    <section class="directories-section" id="rule-files-section">
       <h3>Rule Files</h3>
       <div id="rule-file-list"></div>
       <button id="btn-add-rule-file" class="btn btn-secondary">+ Add Rule File</button>
     </section>
 
-    <section class="skills-section">
+    <section class="skills-section" id="rules-section">
       <div class="skills-header">
         <h3>Available Rules</h3>
         <input type="text" id="rule-filter-input" placeholder="Filter rules..." />

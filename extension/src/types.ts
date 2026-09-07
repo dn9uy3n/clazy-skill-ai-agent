@@ -27,12 +27,20 @@ export interface RuleInfo {
   body?: string;
 }
 
-export type TargetPlatform = 'claude-code' | 'antigravity' | 'cursor';
+export type TargetPlatform = 'claude-code' | 'antigravity' | 'cursor' | 'zcode';
 
 /** Per-directory tally so the panel can show what each configured directory contributed. */
 export interface DirStat {
   dir: string;
   count: number;
+}
+
+/** What the webview needs to render the platform radios — derived from `platforms.ts`. */
+export interface PlatformMeta {
+  id: TargetPlatform;
+  label: string;
+  supportsRuleFiles: boolean;
+  note?: string;
 }
 
 export type WebviewMessage =
@@ -55,6 +63,7 @@ export type ExtensionMessage =
       directories: string[];
       ruleFiles: string[];
       platform: TargetPlatform;
+      platforms: PlatformMeta[];
       dirStats: DirStat[];
       errors: string[];
     }

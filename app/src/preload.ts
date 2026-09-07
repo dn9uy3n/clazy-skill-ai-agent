@@ -1,9 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { AppConfig, ScanResult, TargetPlatform } from './types';
+import { AppConfig, PlatformMeta, ScanResult, TargetPlatform } from './types';
 
 const api = {
   loadConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:load'),
   saveConfig: (config: AppConfig): Promise<void> => ipcRenderer.invoke('config:save', config),
+  getPlatforms: (): Promise<PlatformMeta[]> => ipcRenderer.invoke('platforms:list'),
   selectDirectory: (title: string): Promise<string | null> =>
     ipcRenderer.invoke('dialog:selectDirectory', title),
   selectFiles: (title: string): Promise<string[]> => ipcRenderer.invoke('dialog:selectFiles', title),

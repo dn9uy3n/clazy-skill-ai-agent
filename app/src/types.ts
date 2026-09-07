@@ -20,7 +20,7 @@ export interface RuleInfo {
   body?: string;
 }
 
-export type TargetPlatform = 'claude-code' | 'antigravity' | 'cursor';
+export type TargetPlatform = 'claude-code' | 'antigravity' | 'cursor' | 'zcode';
 
 export interface AppConfig {
   skillDirectories: string[];
@@ -33,6 +33,14 @@ export interface AppConfig {
 export interface DirStat {
   dir: string;
   count: number;
+}
+
+/** What the renderer needs to render the platform radios — derived from `platforms.ts`. */
+export interface PlatformMeta {
+  id: TargetPlatform;
+  label: string;
+  supportsRuleFiles: boolean;
+  note?: string;
 }
 
 export interface ScanResult {

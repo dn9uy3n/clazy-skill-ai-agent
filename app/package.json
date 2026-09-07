@@ -1,13 +1,14 @@
 {
   "name": "lazy-skill-ai-agent-app",
-  "version": "0.7.0",
-  "description": "Standalone desktop application to manage AI skills for Claude Code and Antigravity",
+  "version": "0.8.0",
+  "description": "Standalone desktop application to manage AI skills and rules for Claude Code, Antigravity, Cursor, and ZCode (z.ai)",
   "main": "out/main.js",
   "author": "dn9uy3n",
   "license": "MIT",
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "tsc -p ./ && node --test out/test/*.test.js",
     "start": "npm run compile && electron .",
     "build:win": "npm run compile && electron-builder --win",
     "build:mac": "npm run compile && electron-builder --mac",
@@ -32,6 +33,7 @@
     },
     "files": [
       "out/**/*",
+      "!out/test/**",
       "renderer/**/*",
       "package.json"
     ],

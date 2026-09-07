@@ -2,8 +2,10 @@ import * as fs from 'fs/promises';
 import type { Dirent } from 'fs';
 import * as path from 'path';
 import { DirStat, RuleInfo, SkillInfo, TargetPlatform } from './types';
-import { getRulesDir, getSkillsDir, sanitizeName } from './skillInstaller';
+import { getAgentsMdRuleNames, getRulesDir, getSkillsDir, sanitizeName } from './skillInstaller';
 import { errText, firstLine, readDocHead, toDisplayString } from './frontmatter';
+import { resolveKind } from './fsKind';
+import { getPlatform } from './platforms';
 
 const SCAN_CONCURRENCY = 32;
 const MAX_ERRORS = 50;
@@ -40,22 +42,6 @@ async function mapLimit<T, R>(
   });
   await Promise.all(workers);
   return results;
-}
-
-/** `withFileTypes` avoids a stat per entry, but reports symlinks as neither file nor dir. */
-async function resolveKind(parent: string, entry: Dirent): Promise<'dir' | 'file' | 'other'> {
-  if (entry.isDirectory()) return 'dir';
-  if (entry.isFile()) return 'file';
-  if (entry.isSymbolicLink()) {
-    try {
-      const stat = await fs.stat(path.join(parent, entry.name));
-      if (stat.isDirectory()) return 'dir';
-      if (stat.isFile()) return 'file';
-    } catch {
-      return 'other';
-    }
-  }
-  return 'other';
 }
 
 async function findSkillMdFile(skillDir: string, skillDirName: string): Promise<string | null> {
@@ -219,7 +205,12 @@ export async function getInstalledRuleNames(
   projectPath: string,
   platform: TargetPlatform,
 ): Promise<string[]> {
+  if (getPlatform(platform).rules.kind === 'agents-md') {
+    return getAgentsMdRuleNames(projectPath, platform);
+  }
+
   const rulesDir = getRulesDir(projectPath, platform);
+  if (rulesDir === null) return [];
   try {
     const entries = await fs.readdir(rulesDir, { withFileTypes: true });
     const names: string[] = [];

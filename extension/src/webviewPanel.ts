@@ -18,7 +18,8 @@ import {
   markRulesInstalled,
 } from './skillScanner';
 import { applyChanges } from './skillInstaller';
-import { readBody } from './frontmatter';
+import { readBody } from './docReader';
+import { DEFAULT_PLATFORM, isTargetPlatform, platformUiList } from './platforms';
 
 const CONFIG_NS = 'lazy-skill-ai-agent';
 
@@ -48,7 +49,7 @@ export class LazySkillPanel {
   private watchers: vscode.Disposable[] = [];
   private watchedDirs: string[] = [];
   private watchTimer: NodeJS.Timeout | undefined;
-  private currentPlatform: TargetPlatform = 'claude-code';
+  private currentPlatform: TargetPlatform = DEFAULT_PLATFORM;
   private skills: SkillInfo[] = [];
   private rules: RuleInfo[] = [];
   private scanning = false;
@@ -79,6 +80,12 @@ export class LazySkillPanel {
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
     this.extensionUri = extensionUri;
+
+    const storedPlatform = vscode.workspace
+      .getConfiguration(CONFIG_NS)
+      .get<string>('targetPlatform');
+    if (isTargetPlatform(storedPlatform)) this.currentPlatform = storedPlatform;
+
     this.panel.webview.html = this.getHtml();
 
     this.panel.webview.onDidReceiveMessage(
@@ -94,6 +101,17 @@ export class LazySkillPanel {
     this.panel.onDidChangeViewState(
       e => {
         if (e.webviewPanel.visible) void this.refresh();
+      },
+      null,
+      this.disposables,
+    );
+
+    // Editing lazy-skill-ai-agent.* directly in settings.json (or a sync from
+    // another window) should be reflected without the user having to reopen
+    // the panel.
+    vscode.workspace.onDidChangeConfiguration(
+      e => {
+        if (e.affectsConfiguration(CONFIG_NS)) void this.refresh();
       },
       null,
       this.disposables,
@@ -202,6 +220,7 @@ export class LazySkillPanel {
         directories: dirs,
         ruleFiles,
         platform: this.currentPlatform,
+        platforms: platformUiList(),
         dirStats: skillScan.dirStats as DirStat[],
         errors: [...skillScan.errors, ...ruleScan.errors],
       });
@@ -223,23 +242,38 @@ export class LazySkillPanel {
    * `<skillDir>/link` even when `link` is a symlink pointing anywhere on disk.
    * This is the one place Node's `fs` is used instead of `vscode.workspace.fs`,
    * which has no realpath equivalent.
+   *
+   * A configured directory's *entries* can themselves be symlinks/junctions —
+   * e.g. a `.zcode/skills/foo` folder pointed at a shared `~/.agents/skills/foo`
+   * is a normal setup — so the root itself must not be the thing realpath'd
+   * and compared against: that would resolve straight through to
+   * `~/.agents/skills` and reject every skill under the directory. Instead
+   * each top-level entry under a configured root is resolved individually,
+   * and the requested path must land inside *that* entry's real location. A
+   * symlink nested *inside* a skill folder still resolves outside its
+   * entry's real location and is still rejected.
    */
   private async isReadable(sourcePath: string): Promise<boolean> {
-    const real = await realPathOrNull(sourcePath);
-    if (!real) return false;
+    const target = await realPathOrNull(sourcePath);
+    if (!target) return false;
+    const normTarget = normalizePath(target);
 
-    const target = normalizePath(real);
+    for (const dir of this.getDirectories()) {
+      const normDir = normalizePath(path.resolve(dir));
+      const normSource = normalizePath(path.resolve(sourcePath));
+      if (normSource !== normDir && !normSource.startsWith(normDir + path.sep)) continue;
 
-    const dirs = await Promise.all(this.getDirectories().map(realPathOrNull));
-    const inDir = dirs.some(dir => {
-      if (!dir) return false;
-      const root = normalizePath(dir);
-      return target === root || target.startsWith(root + path.sep);
-    });
-    if (inDir) return true;
+      const entryName = path.relative(dir, sourcePath).split(path.sep)[0];
+      if (!entryName || entryName === '..') continue;
+
+      const entryReal = await realPathOrNull(path.join(dir, entryName));
+      if (!entryReal) continue;
+      const normEntry = normalizePath(entryReal);
+      if (normTarget === normEntry || normTarget.startsWith(normEntry + path.sep)) return true;
+    }
 
     const files = await Promise.all(this.getRuleFiles().map(realPathOrNull));
-    return files.some(file => file !== null && normalizePath(file) === target);
+    return files.some(file => file !== null && normalizePath(file) === normTarget);
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -268,10 +302,22 @@ export class LazySkillPanel {
         break;
       }
 
-      case 'changePlatform':
+      case 'changePlatform': {
+        // The webview is a trust boundary — WebviewMessage's type is only a
+        // compile-time guarantee, so validate before trusting the payload.
+        if (!isTargetPlatform(msg.platform)) break;
         this.currentPlatform = msg.platform;
+        // Workspace-scoped, since which tool a project targets is a property
+        // of the project, not a personal preference (unlike skillDirectories).
+        // ConfigurationTarget.Workspace throws with no folder open, so fall
+        // back to Global there.
+        const target = vscode.workspace.workspaceFolders?.length
+          ? vscode.ConfigurationTarget.Workspace
+          : vscode.ConfigurationTarget.Global;
+        await config.update('targetPlatform', msg.platform, target);
         await this.refresh();
         break;
+      }
 
       case 'addDirectory': {
         const uris = await vscode.window.showOpenDialog({
@@ -389,20 +435,8 @@ export class LazySkillPanel {
   <div class="container">
     <h2>Lazy Skill AI Agent</h2>
 
-    <section class="platform-section">
-      <label class="radio-label">
-        <input type="radio" name="platform" value="claude-code" checked>
-        Claude Code
-      </label>
-      <label class="radio-label">
-        <input type="radio" name="platform" value="antigravity">
-        Antigravity
-      </label>
-      <label class="radio-label">
-        <input type="radio" name="platform" value="cursor">
-        Cursor
-      </label>
-    </section>
+    <section class="platform-section" id="platform-list"></section>
+    <div id="platform-note" class="platform-note"></div>
 
     <section class="directories-section">
       <h3>Skill Directories</h3>
@@ -420,13 +454,13 @@ export class LazySkillPanel {
       <div id="skill-list" class="skill-list"></div>
     </section>
 
-    <section class="directories-section">
+    <section class="directories-section" id="rule-files-section">
       <h3>Rule Files</h3>
       <div id="rule-file-list"></div>
       <button id="btn-add-rule-file" class="btn btn-secondary">+ Add Rule File</button>
     </section>
 
-    <section class="skills-section">
+    <section class="skills-section" id="rules-section">
       <div class="skills-header">
         <h3>Available Rules</h3>
         <input type="text" id="rule-filter-input" placeholder="Filter rules..." />

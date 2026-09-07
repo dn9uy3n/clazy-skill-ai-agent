@@ -39,6 +39,7 @@ h3 {
 /* Platform toggle */
 .platform-section {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 8px 12px;
   background: var(--vscode-input-background);
@@ -52,6 +53,15 @@ h3 {
   gap: 6px;
   cursor: pointer;
   font-weight: 500;
+}
+
+.platform-note {
+  font-size: 0.9em;
+  color: var(--vscode-descriptionForeground);
+  margin-top: -8px;
+}
+.platform-note[hidden] {
+  display: none;
 }
 
 .radio-label input[type="radio"] {

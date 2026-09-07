@@ -2,6 +2,7 @@
 const api = window.lazyApi;
 
 let config = { skillDirectories: [], ruleFiles: [], platform: 'claude-code' };
+let platforms = [];
 let skills = [];
 let rules = [];
 let selectedItemId = null;
@@ -29,6 +30,10 @@ const btnAddRuleFile = document.getElementById('btn-add-rule-file');
 const btnRefresh = document.getElementById('btn-refresh');
 const btnCancel = document.getElementById('btn-cancel');
 const btnApply = document.getElementById('btn-apply');
+const platformList = document.getElementById('platform-list');
+const platformNote = document.getElementById('platform-note');
+const ruleFilesSection = document.getElementById('rule-files-section');
+const rulesSection = document.getElementById('rules-section');
 
 btnSelectProject.addEventListener('click', async () => {
   const dir = await api.selectDirectory('Select Project Folder');
@@ -107,19 +112,48 @@ btnApply.addEventListener('click', async () => {
 filterInput.addEventListener('input', renderSkills);
 ruleFilterInput.addEventListener('input', renderRules);
 
-document.querySelectorAll('input[name="platform"]').forEach(r => {
-  r.addEventListener('change', async e => {
-    config.platform = e.target.value;
-    await api.saveConfig(config);
-    await refresh();
-  });
-});
+/**
+ * Radios are built from `platforms` (fetched once via a dedicated IPC call,
+ * not from the scan result) so the chrome still renders even if a scan
+ * fails — adding a target tool is a registry entry in platforms.ts, not an
+ * edit here.
+ */
+function renderPlatforms() {
+  platformList.innerHTML = '';
+  for (const p of platforms) {
+    const label = document.createElement('label');
+    label.className = 'radio-label';
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'platform';
+    radio.value = p.id;
+    radio.checked = p.id === config.platform;
+    radio.addEventListener('change', async () => {
+      config.platform = p.id;
+      await api.saveConfig(config);
+      renderPlatforms();
+      await refresh();
+    });
+
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(p.label));
+    platformList.appendChild(label);
+  }
+
+  const current = platforms.find(p => p.id === config.platform);
+  platformNote.textContent = current && current.note ? current.note : '';
+  platformNote.hidden = !current || !current.note;
+
+  const supportsRules = !current || current.supportsRuleFiles;
+  ruleFilesSection.hidden = !supportsRules;
+  rulesSection.hidden = !supportsRules;
+}
 
 async function init() {
   config = await api.loadConfig();
-  document
-    .querySelectorAll('input[name="platform"]')
-    .forEach(r => (r.checked = r.value === config.platform));
+  platforms = await api.getPlatforms();
+  renderPlatforms();
   api.onSkillsChanged(() => refresh());
   await refresh();
 }
